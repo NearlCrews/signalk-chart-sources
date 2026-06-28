@@ -2,12 +2,10 @@
 // chartplotter webapp (which renders them) and the Binnacle Companion tile cache (which proxies and
 // caches them). Data and pure helpers only: no MapLibre, no Signal K, no Node or browser APIs.
 
-export type SourceKind = 'xyz' | 'wmts' | 'wms' | 'arcgis' | 'style'
-
 /**
  * What the CONTAINER needs to build the upstream request. The browser-facing path is always
  * /tile/{source}/{z}/{x}/{y} (or /style/{source} for the basemap); the container expands this per
- * kind. The source id (see ChartSource) fully determines every non-z/x/y parameter (LAYERS, STYLES,
+ * `mode`. The source id (see ChartSource) fully determines every non-z/x/y parameter (LAYERS, STYLES,
  * tile size, GIBS date), so the upstream request is reproducible from the id plus z/x/y alone.
  */
 export type UpstreamTemplate =
@@ -23,7 +21,6 @@ export interface ChartSource {
   /** Stable id, fully determines every non-z/x/y parameter. */
   id: string
   title: string
-  kind: SourceKind
   upstream: UpstreamTemplate
   tileSize: 256 | 512
   minzoom: number

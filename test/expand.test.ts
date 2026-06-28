@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import { expandUpstreamUrl, proxyTileTemplate } from '../src/expand.js'
 import type { ChartSource } from '../src/types.js'
 
-const xyz: ChartSource = { id: 'x', title: 'X', kind: 'xyz', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'xyz', urlTemplate: 'https://h/{z}/{x}/{y}.png' } }
-const wmts: ChartSource = { id: 'w', title: 'W', kind: 'wmts', tileSize: 512, minzoom: 0, maxzoom: 16, attribution: '', upstream: { mode: 'wmts', urlTemplate: 'https://h/wmts?TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}' } }
-const wms: ChartSource = { id: 's', title: 'S', kind: 'wms', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'wms', base: 'https://w/wms', layers: '0,1', styles: 'q', version: '1.3.0', format: 'image/png', transparent: true } }
-const arcgis: ChartSource = { id: 'a', title: 'A', kind: 'arcgis', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'arcgis', base: 'https://m/MapServer' } }
+const xyz: ChartSource = { id: 'x', title: 'X', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'xyz', urlTemplate: 'https://h/{z}/{x}/{y}.png' } }
+const wmts: ChartSource = { id: 'w', title: 'W', tileSize: 512, minzoom: 0, maxzoom: 16, attribution: '', upstream: { mode: 'wmts', urlTemplate: 'https://h/wmts?TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}' } }
+const wms: ChartSource = { id: 's', title: 'S', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'wms', base: 'https://w/wms', layers: '0,1', styles: 'q', version: '1.3.0', format: 'image/png', transparent: true } }
+const arcgis: ChartSource = { id: 'a', title: 'A', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'arcgis', base: 'https://m/MapServer' } }
 
 test('xyz substitutes z, x, and y', () => {
   assert.equal(expandUpstreamUrl(xyz, 3, 2, 1), 'https://h/3/2/1.png')

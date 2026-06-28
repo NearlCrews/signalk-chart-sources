@@ -10,14 +10,14 @@ test('every source id is unique', () => {
 
 test('every non-style source expands to an absolute https URL at its minzoom', () => {
   for (const s of CHART_SOURCES) {
-    if (s.kind === 'style') continue
+    if (s.upstream.mode === 'style') continue
     const url = expandUpstreamUrl(s, s.minzoom, 0, 0)
     assert.ok(/^https:\/\//.test(url), `${s.id} expanded to ${url}`)
   }
 })
 
 test('the basemap is the single style source and carries an allowed host', () => {
-  const styles = CHART_SOURCES.filter((s) => s.kind === 'style')
+  const styles = CHART_SOURCES.filter((s) => s.upstream.mode === 'style')
   assert.equal(styles.length, 1)
   const basemap = styles[0]
   assert.equal(basemap.id, 'basemap')
@@ -39,5 +39,5 @@ test('key sources pin their transcribed upstream data (drift guard)', () => {
   if (enc && enc.upstream.mode === 'wms') assert.equal(enc.upstream.layers, '0,1,2,3,4,5,6,7,10')
   const bluetopo = CHART_SOURCES.find((s) => s.id === 'depth-bluetopo')
   assert.equal(bluetopo?.tileSize, 512)
-  assert.equal(bluetopo?.kind, 'wmts')
+  assert.equal(bluetopo?.upstream.mode, 'wmts')
 })

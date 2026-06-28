@@ -22,7 +22,7 @@ function wms (
   extra: { minzoom?: number, maxzoom?: number, bounds?: [number, number, number, number], attribution: string, group?: { id: string, title: string } }
 ): ChartSource {
   return {
-    id, title, kind: 'wms', tileSize: 256,
+    id, title, tileSize: 256,
     minzoom: extra.minzoom ?? 0, maxzoom: extra.maxzoom ?? 18,
     ...(extra.bounds ? { bounds: extra.bounds } : {}),
     attribution: extra.attribution, ...(extra.group ? { group: extra.group } : {}),
@@ -41,7 +41,7 @@ export const CHART_SOURCES: ChartSource[] = [
     maxzoom: 12, bounds: EMODNET_BOUNDS, attribution: 'EMODnet Bathymetry Consortium (2022): EMODnet Digital Bathymetry (DTM)', group: { id: 'emodnet', title: 'EMODnet (Europe)' }
   }),
   {
-    id: 'depth-bluetopo', title: 'BlueTopo bathymetry', kind: 'wmts', tileSize: 512,
+    id: 'depth-bluetopo', title: 'BlueTopo bathymetry', tileSize: 512,
     minzoom: 0, maxzoom: 16, bounds: BLUETOPO_BOUNDS,
     attribution: 'NOAA Office of Coast Survey, BlueTopo / National Bathymetric Source',
     group: { id: 'bluetopo', title: 'BlueTopo (US)' },
@@ -57,7 +57,7 @@ export const CHART_SOURCES: ChartSource[] = [
     bounds: ENC_BOUNDS, attribution: 'NOAA Office of Coast Survey, Electronic Navigational Charts (ENC)', group: { id: 'noaa-enc', title: 'NOAA ENC (US)' }
   }),
   {
-    id: 'seamark', title: 'OpenSeaMap seamarks', kind: 'xyz', tileSize: 256,
+    id: 'seamark', title: 'OpenSeaMap seamarks', tileSize: 256,
     minzoom: 0, maxzoom: 18, attribution: '© OpenSeaMap contributors, ODbL',
     upstream: { mode: 'xyz', urlTemplate: 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png' }
   },
@@ -74,13 +74,13 @@ export const CHART_SOURCES: ChartSource[] = [
     attribution: 'EMODnet Human Activities', group: { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
   }),
   {
-    id: 'mpa-noaa', title: 'NOAA MPA inventory', kind: 'arcgis', tileSize: 256,
+    id: 'mpa-noaa', title: 'NOAA MPA inventory', tileSize: 256,
     minzoom: 0, maxzoom: 18, bounds: [-180, 15, -60, 75],
     attribution: 'NOAA National Marine Protected Areas Center',
     upstream: { mode: 'arcgis', base: NOAA_MPA_SERVER }
   },
   {
-    id: 'basemap', title: 'OpenFreeMap Liberty', kind: 'style', tileSize: 256,
+    id: 'basemap', title: 'OpenFreeMap Liberty', tileSize: 256,
     minzoom: 0, maxzoom: 20,
     attribution: '© OpenMapTiles, © OpenStreetMap contributors',
     upstream: { mode: 'style', styleUrl: 'https://tiles.openfreemap.org/styles/liberty', allowedHosts: ['tiles.openfreemap.org'] }
