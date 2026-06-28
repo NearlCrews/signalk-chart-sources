@@ -1,0 +1,33 @@
+{
+  "name": "signalk-binnacle-chart-sources",
+  "version": "0.0.0",
+  "description": "Shared definitions of the chart and raster overlay sources for the Binnacle chartplotter and the Binnacle Companion tile cache.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "keywords": [
+    "signalk",
+    "chartplotter",
+    "tiles",
+    "wms",
+    "wmts"
+  ],
+  "author": "Nearl Crews",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
