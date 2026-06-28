@@ -1,3 +1,5 @@
+import type { ChartSource } from './types.js'
+
 // Half the web-mercator extent in meters (EPSG:3857). The webapp and the container both use this one
 // constant, so the TS and Rust copies are bit-exact.
 const ORIGIN = 20037508.342789244
@@ -40,8 +42,6 @@ export function tileForLngLat (lng: number, lat: number, z: number): { x: number
   }
 }
 
-import type { ChartSource } from './types.js'
-
 export type ZXY = { z: number, x: number, y: number }
 
 // Clip the request bbox to the source bounds and the Mercator latitude limit, and reject a non-finite,
@@ -73,7 +73,7 @@ function tileRange (clip: [number, number, number, number], z: number): { x0: nu
   return { x0: tl.x, x1: br.x, y0: tl.y, y1: br.y }
 }
 
-/** The number of tiles a warm over this bbox and zoom range would touch. An upper-bound gate for the panel estimate. */
+/** The number of tiles that would be covered over this bbox and zoom range. Upper-bound gate for the panel estimate. */
 export function tileCountInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): number {
   const clip = clipBbox(source, bbox)
   if (!clip) return 0
@@ -86,7 +86,7 @@ export function tileCountInBbox (source: ChartSource, bbox: [number, number, num
   return count
 }
 
-/** Enumerate every z/x/y a warm over this bbox and zoom range would touch. */
+/** Enumerate every z/x/y that would be covered over this bbox and zoom range. */
 export function tilesInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): ZXY[] {
   const clip = clipBbox(source, bbox)
   if (!clip) return []
