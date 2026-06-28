@@ -39,3 +39,64 @@ export function tileForLngLat (lng: number, lat: number, z: number): { x: number
     y: Math.min(max, Math.max(0, yf))
   }
 }
+
+import type { ChartSource } from './types.js'
+
+export type ZXY = { z: number, x: number, y: number }
+
+// Clip the request bbox to the source bounds and the Mercator latitude limit, and reject a non-finite,
+// degenerate, or antimeridian-crossing (minLng > maxLng) box. Returns null when nothing remains.
+function clipBbox (source: ChartSource, bbox: [number, number, number, number]): [number, number, number, number] | null {
+  let [minLng, minLat, maxLng, maxLat] = bbox
+  if (![minLng, minLat, maxLng, maxLat].every(Number.isFinite)) return null
+  if (minLng > maxLng) return null
+  if (source.bounds) {
+    const [bMinLng, bMinLat, bMaxLng, bMaxLat] = source.bounds
+    minLng = Math.max(minLng, bMinLng); minLat = Math.max(minLat, bMinLat)
+    maxLng = Math.min(maxLng, bMaxLng); maxLat = Math.min(maxLat, bMaxLat)
+  }
+  minLat = Math.max(minLat, -MAX_MERCATOR_LAT); maxLat = Math.min(maxLat, MAX_MERCATOR_LAT)
+  if (minLng >= maxLng || minLat >= maxLat) return null
+  return [minLng, minLat, maxLng, maxLat]
+}
+
+function zoomBounds (source: ChartSource, [zmin, zmax]: [number, number]): [number, number] {
+  return [Math.max(zmin, source.minzoom), Math.min(zmax, source.maxzoom)]
+}
+
+// The inclusive tile rectangle [x0..x1] by [y0..y1] covering the clipped bbox at zoom z. y increases
+// downward, so the north edge (maxLat) is the smaller y.
+function tileRange (clip: [number, number, number, number], z: number): { x0: number, x1: number, y0: number, y1: number } {
+  const [minLng, minLat, maxLng, maxLat] = clip
+  const tl = tileForLngLat(minLng, maxLat, z)
+  const br = tileForLngLat(maxLng, minLat, z)
+  return { x0: tl.x, x1: br.x, y0: tl.y, y1: br.y }
+}
+
+/** The number of tiles a warm over this bbox and zoom range would touch. An upper-bound gate for the panel estimate. */
+export function tileCountInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): number {
+  const clip = clipBbox(source, bbox)
+  if (!clip) return 0
+  const [zmin, zmax] = zoomBounds(source, zoomRange)
+  let count = 0
+  for (let z = zmin; z <= zmax; z++) {
+    const { x0, x1, y0, y1 } = tileRange(clip, z)
+    count += (x1 - x0 + 1) * (y1 - y0 + 1)
+  }
+  return count
+}
+
+/** Enumerate every z/x/y a warm over this bbox and zoom range would touch. */
+export function tilesInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): ZXY[] {
+  const clip = clipBbox(source, bbox)
+  if (!clip) return []
+  const [zmin, zmax] = zoomBounds(source, zoomRange)
+  const out: ZXY[] = []
+  for (let z = zmin; z <= zmax; z++) {
+    const { x0, x1, y0, y1 } = tileRange(clip, z)
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) out.push({ z, x, y })
+    }
+  }
+  return out
+}
