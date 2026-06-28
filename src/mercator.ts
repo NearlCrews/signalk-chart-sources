@@ -16,3 +16,26 @@ export function webMercatorTileBounds (z: number, x: number, y: number): [number
   const minY = maxY - size
   return [minX, minY, maxX, maxY]
 }
+
+// The Web Mercator latitude limit (about plus or minus 85.0511 degrees). Beyond it the projection is
+// undefined, so callers clamp to it before projecting.
+export const MAX_MERCATOR_LAT = 85.0511287798066
+
+/**
+ * The standard slippy-tile floor: the integer tile z/x/y that contains (lng, lat). This is the inverse
+ * of webMercatorTileBounds. Unlike the forward direction it need not be bit-exact across the TS and the
+ * Rust; it only selects which integer tiles to enumerate, and those tiles then flow through the same
+ * forward expand path and produce the same cache key. The Rust container carries the same formula.
+ */
+export function tileForLngLat (lng: number, lat: number, z: number): { x: number, y: number } {
+  const n = 2 ** z
+  const clampedLat = Math.max(-MAX_MERCATOR_LAT, Math.min(MAX_MERCATOR_LAT, lat))
+  const latRad = (clampedLat * Math.PI) / 180
+  const xf = Math.floor(((lng + 180) / 360) * n)
+  const yf = Math.floor(((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2) * n)
+  const max = n - 1
+  return {
+    x: Math.min(max, Math.max(0, xf)),
+    y: Math.min(max, Math.max(0, yf))
+  }
+}
