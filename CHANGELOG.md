@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Shared tile-count byte estimate.** `estimateBytes(sourceIds, bbox, zoomRange, perSourceAvgBytes)`
+  returns the upper-bound byte total for a region download: for each known source it multiplies
+  `tileCountInBbox` by that source's average tile size, falling back to the new `DEFAULT_TILE_BYTES`
+  constant (25,000) when a source has never been cached. Exporting one implementation lets the Chart
+  Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
+  re-validation agrees with the panel estimate. Unknown source ids are skipped.
+
 <a id="v010"></a>
 
 ## [0.1.0] - 2026-06-28
