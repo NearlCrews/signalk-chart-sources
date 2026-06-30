@@ -25,6 +25,10 @@ export interface ChartSource {
   tileSize: 256 | 512
   minzoom: number
   maxzoom: number
+  /** The native vector-tile maxzoom, distinct from maxzoom (the MapLibre overzoom render ceiling).
+   * Present on a vector style source; the warm and the estimate clamp to it so they never request
+   * vector tiles above the level the upstream actually serves. */
+  vectorMaxzoom?: number
   bounds?: [number, number, number, number]
   attribution: string
   group?: { id: string, title: string }

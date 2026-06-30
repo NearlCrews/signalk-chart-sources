@@ -81,7 +81,7 @@ export const CHART_SOURCES: ChartSource[] = [
   },
   {
     id: 'basemap', title: 'OpenFreeMap Liberty', tileSize: 256,
-    minzoom: 0, maxzoom: 20,
+    minzoom: 0, maxzoom: 20, vectorMaxzoom: 14,
     attribution: '© OpenMapTiles, © OpenStreetMap contributors',
     upstream: { mode: 'style', styleUrl: 'https://tiles.openfreemap.org/styles/liberty', allowedHosts: ['tiles.openfreemap.org'] }
   }

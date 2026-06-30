@@ -61,7 +61,7 @@ function clipBbox (source: ChartSource, bbox: [number, number, number, number]):
 }
 
 function zoomBounds (source: ChartSource, [zmin, zmax]: [number, number]): [number, number] {
-  return [Math.max(zmin, source.minzoom), Math.min(zmax, source.maxzoom)]
+  return [Math.max(zmin, source.minzoom), Math.min(zmax, source.maxzoom, source.vectorMaxzoom ?? source.maxzoom)]
 }
 
 // The inclusive tile rectangle [x0..x1] by [y0..y1] covering the clipped bbox at zoom z. y increases

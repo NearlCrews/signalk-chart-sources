@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { tileForLngLat, webMercatorTileBounds, MAX_MERCATOR_LAT } from '../src/mercator.js'
+import { CHART_SOURCES } from '../src/registry.js'
 
 test('tileForLngLat returns 0,0 at zoom 0', () => {
   assert.deepEqual(tileForLngLat(0, 0, 0), { x: 0, y: 0 })
@@ -78,4 +79,12 @@ test('an antimeridian-crossing box is rejected (empty) in v2', () => {
 test('a non-finite or degenerate box yields nothing', () => {
   assert.equal(tileCountInBbox(xyz(), [Number.NaN, 0, 1, 1], [2, 2]), 0)
   assert.equal(tileCountInBbox(xyz(), [5, 5, 5, 5], [2, 2]), 0)
+})
+
+test('tileCountInBbox clamps a vector source to vectorMaxzoom even when asked for a higher zoom', () => {
+  const basemap = CHART_SOURCES.find((s) => s.id === 'basemap')!
+  // The basemap maxzoom is 20 but vectorMaxzoom is 14; a request for z0..16 must enumerate no tiles above 14.
+  const wide = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 16])
+  const at14 = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 14])
+  assert.equal(wide, at14, 'the count clamps to vectorMaxzoom (14), so z15 and z16 add nothing')
 })
