@@ -41,3 +41,19 @@ test('key sources pin their transcribed upstream data (drift guard)', () => {
   assert.equal(bluetopo?.tileSize, 512)
   assert.equal(bluetopo?.upstream.mode, 'wmts')
 })
+
+test('chart bounds separate US and EU coverage so defaults and the summary stay honest', () => {
+  const byId = Object.fromEntries(CHART_SOURCES.map((s) => [s.id, s]))
+  const inBox = (b, lng, lat) =>
+    b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
+  // NOAA ENC is US only: a Mediterranean point (Naples) is outside it; a US point (Newport) is inside.
+  assert.equal(inBox(byId['depth-noaa-enc'].bounds, 14.25, 40.8), false)
+  assert.equal(inBox(byId['depth-noaa-enc'].bounds, -71.3, 41.5), true)
+  // EMODnet is EU only: a US northeast point (Boston) is outside it; an EU point (English Channel) is inside.
+  assert.equal(inBox(byId['depth-emodnet'].bounds, -71, 42.3), false)
+  assert.equal(inBox(byId['depth-emodnet'].bounds, 0, 50), true)
+  // The EU protected-area layers now carry bounds so they self-hide outside Europe.
+  assert.ok(byId['mpa-emodnet'].bounds)
+  assert.ok(byId['mpa-natura2000'].bounds)
+  assert.equal(inBox(byId['mpa-emodnet'].bounds, -71, 42.3), false)
+})

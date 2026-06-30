@@ -12,9 +12,9 @@ const BLUETOPO_WMS = 'https://nowcoast.noaa.gov/geoserver/bluetopo/wms'
 const MARINE_REGIONS_WMS = 'https://geo.vliz.be/geoserver/MarineRegions/wms'
 const NOAA_MPA_SERVER = 'https://gis.charttools.noaa.gov/arcgis/rest/services/survey_priorities2_national/MPA_Inventory_Separates/MapServer'
 
-const EMODNET_BOUNDS: [number, number, number, number] = [-73.125, 5.625, 45.0, 90.0]
+const EMODNET_BOUNDS: [number, number, number, number] = [-30.0, 25.0, 43.0, 84.0]
 const BLUETOPO_BOUNDS: [number, number, number, number] = [-138.0, -53.876, 17.046, 59.55]
-const ENC_BOUNDS: [number, number, number, number] = [-180, -15, 180, 75]
+const ENC_BOUNDS: [number, number, number, number] = [-180, 17, -64, 72]
 
 /** Build a WMS GetMap ChartSource (256 px, EPSG:3857, image/png, transparent), matching the webapp wmsTiles. */
 function wms (
@@ -68,10 +68,10 @@ export const CHART_SOURCES: ChartSource[] = [
     attribution: 'Flanders Marine Institute (VLIZ), marineregions.org, CC-BY'
   }),
   wms('mpa-emodnet', 'Marine protected areas', EMODNET_HA_WMS, 'marineprotectedareas', '', {
-    attribution: 'EMODnet Human Activities', group: { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
+    bounds: EMODNET_BOUNDS, attribution: 'EMODnet Human Activities', group: { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
   }),
   wms('mpa-natura2000', 'Natura 2000', EMODNET_HA_WMS, 'natura2000areas', '', {
-    attribution: 'EMODnet Human Activities', group: { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
+    bounds: EMODNET_BOUNDS, attribution: 'EMODnet Human Activities', group: { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
   }),
   {
     id: 'mpa-noaa', title: 'NOAA MPA inventory', tileSize: 256,
