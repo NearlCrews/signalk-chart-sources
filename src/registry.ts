@@ -14,8 +14,9 @@ const NOAA_MPA_SERVER = 'https://gis.charttools.noaa.gov/arcgis/rest/services/su
 
 const EMODNET_BOUNDS: [number, number, number, number] = [-30.0, 25.0, 43.0, 84.0]
 // The BlueTopo geographic extent from the service GetCapabilities (bluetopo:bathymetry): US waters
-// from the western Pacific to the western Atlantic. Do not narrow to positive longitudes; south is a
-// positive latitude and east is a negative longitude.
+// spanning longitude -138 to -64.198 (all western hemisphere, so all negative) and latitude 16.786 to
+// 59.55 north. The tuple is [minLng, minLat, maxLng, maxLat]; do not clip the longitudes to positive
+// values, which an earlier bounds error did and which drops the whole extent.
 const BLUETOPO_BOUNDS: [number, number, number, number] = [-138.0, 16.786, -64.198, 59.55]
 const ENC_BOUNDS: [number, number, number, number] = [-180, 17, -64, 72]
 const MPA_NOAA_BOUNDS: [number, number, number, number] = [-180, 15, -60, 75]
