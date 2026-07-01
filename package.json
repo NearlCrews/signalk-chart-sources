@@ -8,9 +8,6 @@
   "files": [
     "dist"
   ],
-  "engines": {
-    "node": ">=20"
-  },
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
@@ -22,10 +19,28 @@
     "chartplotter",
     "tiles",
     "wms",
-    "wmts"
+    "wmts",
+    "arcgis",
+    "web-mercator",
+    "marine",
+    "chart-sources"
   ],
-  "author": "Nearl Crews",
-  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "author": {
+    "name": "Nearl Crews",
+    "email": "NearlCrews@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/NearlCrews/signalk-chart-sources#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NearlCrews/signalk-chart-sources.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NearlCrews/signalk-chart-sources/issues"
+  },
   "devDependencies": {
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

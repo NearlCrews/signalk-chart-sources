@@ -1,0 +1,108 @@
+name: Bug report
+description: Report a defect in the library
+title: "[BUG] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the sections below so the issue can be reproduced and triaged.
+        For usage questions, please use [Discussions](https://github.com/NearlCrews/signalk-chart-sources/discussions) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear summary of the bug.
+      placeholder: tilesInBbox returns tiles outside the source bounds near the antimeridian.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: A minimal code sample and the inputs that trigger the bug.
+      placeholder: |
+        import { CHART_SOURCES, tilesInBbox } from 'signalk-chart-sources'
+        const source = CHART_SOURCES.find((s) => s.id === 'seamark')
+        const tiles = tilesInBbox(source, [179, 0, -179, 1], [0, 4])
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Source registry (CHART_SOURCES)
+        - Web Mercator tile math (webMercatorTileBounds, tileForLngLat, tilesInBbox, tileCountInBbox)
+        - Upstream URL building (expandUpstreamUrl, proxyTileTemplate)
+        - Byte estimate (estimateBytes, DEFAULT_TILE_BYTES)
+        - Types (ChartSource, UpstreamTemplate)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: source-id
+    attributes:
+      label: Chart source id
+      description: Optional. If the bug is tied to a specific source, give its id.
+      placeholder: depth-gebco
+
+  - type: input
+    id: package-version
+    attributes:
+      label: Package version
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: 20.18.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How is the package used
+      options:
+        - Transitive dependency of signalk-chart-locker
+        - Transitive dependency of signalk-binnacle
+        - Direct dependency
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or errors
+      description: Paste the relevant output, stack trace, or returned value.
+      render: text
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else helpful.

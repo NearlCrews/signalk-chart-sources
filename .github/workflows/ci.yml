@@ -1,0 +1,38 @@
+# Continuous integration: build, type-check, and test the library on every push
+# and pull request against main, across the supported Node.js versions.
+
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
