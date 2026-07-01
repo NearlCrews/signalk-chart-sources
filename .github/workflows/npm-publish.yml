@@ -52,7 +52,8 @@ jobs:
           registry-url: https://registry.npmjs.org/
       - run: npm ci
       # The prepare script rebuilds dist/ before the package is published, so the
-      # tarball always ships fresh artifacts.
-      - run: npm publish --provenance
+      # tarball always ships fresh artifacts. --access public is required for the
+      # first publish of a new package when attaching a provenance attestation.
+      - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
