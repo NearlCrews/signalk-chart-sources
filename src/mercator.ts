@@ -52,10 +52,14 @@ function clipBbox (source: ChartSource, bbox: [number, number, number, number]):
   if (minLng > maxLng) return null
   if (source.bounds) {
     const [bMinLng, bMinLat, bMaxLng, bMaxLat] = source.bounds
-    minLng = Math.max(minLng, bMinLng); minLat = Math.max(minLat, bMinLat)
-    maxLng = Math.min(maxLng, bMaxLng); maxLat = Math.min(maxLat, bMaxLat)
+    if (![bMinLng, bMinLat, bMaxLng, bMaxLat].every(Number.isFinite)) return null
+    minLng = Math.max(minLng, bMinLng)
+    minLat = Math.max(minLat, bMinLat)
+    maxLng = Math.min(maxLng, bMaxLng)
+    maxLat = Math.min(maxLat, bMaxLat)
   }
-  minLat = Math.max(minLat, -MAX_MERCATOR_LAT); maxLat = Math.min(maxLat, MAX_MERCATOR_LAT)
+  minLat = Math.max(minLat, -MAX_MERCATOR_LAT)
+  maxLat = Math.min(maxLat, MAX_MERCATOR_LAT)
   if (minLng >= maxLng || minLat >= maxLat) return null
   return [minLng, minLat, maxLng, maxLat]
 }
@@ -73,14 +77,25 @@ function tileRange (clip: [number, number, number, number], z: number): { x0: nu
   return { x0: tl.x, x1: br.x, y0: tl.y, y1: br.y }
 }
 
+// The inclusive tile rectangle per zoom level covering the clipped bbox, shared by the count and the
+// enumeration below so the clip, zoom-clamp, and per-level tileForLngLat walk are spelled once.
+function coveredRanges (
+  source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]
+): Array<{ z: number, x0: number, x1: number, y0: number, y1: number }> {
+  const clip = clipBbox(source, bbox)
+  if (!clip) return []
+  const [zmin, zmax] = zoomBounds(source, zoomRange)
+  const ranges: Array<{ z: number, x0: number, x1: number, y0: number, y1: number }> = []
+  for (let z = zmin; z <= zmax; z++) {
+    ranges.push({ z, ...tileRange(clip, z) })
+  }
+  return ranges
+}
+
 /** The number of tiles that would be covered over this bbox and zoom range. Upper-bound gate for the panel estimate. */
 export function tileCountInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): number {
-  const clip = clipBbox(source, bbox)
-  if (!clip) return 0
-  const [zmin, zmax] = zoomBounds(source, zoomRange)
   let count = 0
-  for (let z = zmin; z <= zmax; z++) {
-    const { x0, x1, y0, y1 } = tileRange(clip, z)
+  for (const { x0, x1, y0, y1 } of coveredRanges(source, bbox, zoomRange)) {
     count += (x1 - x0 + 1) * (y1 - y0 + 1)
   }
   return count
@@ -88,14 +103,14 @@ export function tileCountInBbox (source: ChartSource, bbox: [number, number, num
 
 /** Enumerate every z/x/y that would be covered over this bbox and zoom range. */
 export function tilesInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): ZXY[] {
-  const clip = clipBbox(source, bbox)
-  if (!clip) return []
-  const [zmin, zmax] = zoomBounds(source, zoomRange)
-  const out: ZXY[] = []
-  for (let z = zmin; z <= zmax; z++) {
-    const { x0, x1, y0, y1 } = tileRange(clip, z)
+  const ranges = coveredRanges(source, bbox, zoomRange)
+  let total = 0
+  for (const { x0, x1, y0, y1 } of ranges) total += (x1 - x0 + 1) * (y1 - y0 + 1)
+  const out: ZXY[] = new Array(total)
+  let i = 0
+  for (const { z, x0, x1, y0, y1 } of ranges) {
     for (let x = x0; x <= x1; x++) {
-      for (let y = y0; y <= y1; y++) out.push({ z, x, y })
+      for (let y = y0; y <= y1; y++) out[i++] = { z, x, y }
     }
   }
   return out

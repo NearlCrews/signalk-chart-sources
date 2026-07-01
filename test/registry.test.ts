@@ -57,3 +57,30 @@ test('chart bounds separate US and EU coverage so defaults and the summary stay 
   assert.ok(byId['mpa-natura2000'].bounds)
   assert.equal(inBox(byId['mpa-emodnet'].bounds, -71, 42.3), false)
 })
+
+test('every source has a sane zoom range and a vectorMaxzoom within maxzoom', () => {
+  for (const s of CHART_SOURCES) {
+    assert.ok(s.minzoom <= s.maxzoom, `${s.id} minzoom ${s.minzoom} > maxzoom ${s.maxzoom}`)
+    if (s.vectorMaxzoom !== undefined) {
+      assert.ok(s.vectorMaxzoom <= s.maxzoom, `${s.id} vectorMaxzoom ${s.vectorMaxzoom} > maxzoom ${s.maxzoom}`)
+    }
+  }
+})
+
+test('every bounded source has a finite, non-degenerate west, south, east, north box', () => {
+  for (const s of CHART_SOURCES) {
+    if (!s.bounds) continue
+    const [west, south, east, north] = s.bounds
+    assert.ok([west, south, east, north].every(Number.isFinite), `${s.id} bounds must be finite`)
+    assert.ok(west < east, `${s.id} west ${west} must be less than east ${east}`)
+    assert.ok(south < north, `${s.id} south ${south} must be less than north ${north}`)
+  }
+})
+
+test('BlueTopo bounds pin the US extent from the service capabilities (drift guard)', () => {
+  const bluetopo = CHART_SOURCES.find((s) => s.id === 'depth-bluetopo')
+  assert.ok(bluetopo?.bounds, 'depth-bluetopo must carry bounds')
+  // South is a positive latitude and east is a negative longitude; a regression to the earlier
+  // South Atlantic and European box fails here.
+  assert.deepEqual(bluetopo?.bounds, [-138.0, 16.786, -64.198, 59.55])
+})

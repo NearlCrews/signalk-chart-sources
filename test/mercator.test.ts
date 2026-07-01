@@ -36,6 +36,14 @@ test('the inverse lands inside its own forward tile bounds', () => {
   assert.ok(my >= minY && my <= maxY, 'y falls within the tile')
 })
 
+test('webMercatorTileBounds returns the full 3857 extent at z0,0,0', () => {
+  // The single zoom-0 tile spans the whole Web Mercator square, so its bounds are +/- ORIGIN.
+  assert.deepEqual(
+    webMercatorTileBounds(0, 0, 0),
+    [-20037508.342789244, -20037508.342789244, 20037508.342789244, 20037508.342789244]
+  )
+})
+
 import { tilesInBbox, tileCountInBbox } from '../src/mercator.js'
 import type { ChartSource } from '../src/types.js'
 
@@ -45,9 +53,16 @@ const xyz = (over: Partial<ChartSource> = {}): ChartSource => ({
 })
 
 test('tileCountInBbox counts the tile rectangle at each zoom', () => {
-  // The whole world at zoom 0 is one tile; at zoom 1 it is four.
+  // A covering box falls in the single z0 tile; over zoom 0 to 1 it adds the four z1 tiles.
   assert.equal(tileCountInBbox(xyz(), [-179, -80, 179, 80], [0, 0]), 1)
   assert.equal(tileCountInBbox(xyz(), [-179, -80, 179, 80], [0, 1]), 5)
+})
+
+test('tilesInBbox yields the exact z/x/y tiles, not just the right count', () => {
+  // Zoom 0 has one tile for any covering box.
+  assert.deepEqual(tilesInBbox(xyz(), [-10, -10, 10, 10], [0, 0]), [{ z: 0, x: 0, y: 0 }])
+  // A small box in the northeast quadrant at zoom 1 is the top-right tile: x 1, y 0.
+  assert.deepEqual(tilesInBbox(xyz(), [1, 1, 11, 11], [1, 1]), [{ z: 1, x: 1, y: 0 }])
 })
 
 test('tilesInBbox enumerates exactly tileCountInBbox tiles', () => {
@@ -79,10 +94,14 @@ test('an antimeridian-crossing box is rejected (empty) in v2', () => {
 test('a non-finite or degenerate box yields nothing', () => {
   assert.equal(tileCountInBbox(xyz(), [Number.NaN, 0, 1, 1], [2, 2]), 0)
   assert.equal(tileCountInBbox(xyz(), [5, 5, 5, 5], [2, 2]), 0)
+  // Enumeration takes the same guard path as the count, exercised here so both are covered.
+  assert.deepEqual(tilesInBbox(xyz(), [Number.NaN, 0, 1, 1], [2, 2]), [])
+  assert.deepEqual(tilesInBbox(xyz(), [5, 5, 5, 5], [2, 2]), [])
 })
 
 test('tileCountInBbox clamps a vector source to vectorMaxzoom even when asked for a higher zoom', () => {
-  const basemap = CHART_SOURCES.find((s) => s.id === 'basemap')!
+  const basemap = CHART_SOURCES.find((s) => s.id === 'basemap')
+  assert.ok(basemap, 'basemap source must exist')
   // The basemap maxzoom is 20 but vectorMaxzoom is 14; a request for z0..16 must enumerate no tiles above 14.
   const wide = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 16])
   const at14 = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 14])
