@@ -31,7 +31,12 @@ Everything is exported from the package root.
 
 - `CHART_SOURCES`: the array of every chart and raster overlay source, each with its upstream URL
   template, tile size, zoom range, optional geographic bounds, and attribution.
+- `chartSourceById(id)`: the catalog entry for a stable source id, or `undefined` for an unknown id.
 - `ChartSource`, `UpstreamTemplate`: the types that describe a source and its five upstream modes.
+- `ChartGroup`: the group descriptor a source and its facets share.
+- `Bbox`, `ZoomRange`: the `[minX, minY, maxX, maxY]` box tuple (geographic boxes are
+  `[west, south, east, north]` degrees) and the inclusive `[minzoom, maxzoom]` pair used across the
+  API.
 
 ### Web Mercator tile math
 
@@ -62,13 +67,13 @@ Everything is exported from the package root.
 ### Usage
 
 ```ts
-import { CHART_SOURCES, tileCountInBbox, estimateBytes } from 'signalk-chart-sources'
+import { chartSourceById, tileCountInBbox, estimateBytes, type Bbox, type ZoomRange } from 'signalk-chart-sources'
 
-const bbox: [number, number, number, number] = [-122.5, 37.7, -122.3, 37.9]
-const zoomRange: [number, number] = [0, 12]
+const bbox: Bbox = [-122.5, 37.7, -122.3, 37.9]
+const zoomRange: ZoomRange = [0, 12]
 
 // How many tiles would a GEBCO download over San Francisco Bay cover?
-const gebco = CHART_SOURCES.find((s) => s.id === 'depth-gebco')!
+const gebco = chartSourceById('depth-gebco')!
 const tiles = tileCountInBbox(gebco, bbox, zoomRange)
 
 // The upper-bound byte total for that region, with no cached averages yet.

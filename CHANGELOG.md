@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<a id="v020"></a>
+
+## [0.2.0] - 2026-07-04
+
+A cleanup release: the public API gains named types and an id lookup, the test suites now
+type-check under the same strict settings as the library, and the registry carries more drift
+guards.
+
+### Added
+
+- **Named tuple types.** `Bbox` (`[minX, minY, maxX, maxY]`; geographic boxes are
+  `[west, south, east, north]` degrees) and `ZoomRange` (the inclusive `[minzoom, maxzoom]` pair)
+  name the tuples every helper already took, and `ChartGroup` names the group descriptor a source
+  and its facets share. All three are exported, so consumers no longer restate the shapes by hand.
+- **`chartSourceById(id)`.** The catalog lookup by stable id, now shared by `estimateBytes` and
+  available to consumers instead of ad hoc `CHART_SOURCES.find` scans.
+- **Strict type-checking for the tests.** `npm run typecheck` now also checks `test/` under the
+  library's strict compiler settings through `tsconfig.test.json`, and the suites share one
+  `makeSource` fixture. New tests pin the OpenSeaMap, NOAA MPA inventory, and basemap upstreams,
+  the group title and attribution invariants, the longitude and latitude ranges of every bounded
+  source, the zero estimate for a bbox outside a source's bounds, and the out-of-range longitude
+  clamp in `tileForLngLat`.
+
+### Changed
+
+- `substituteZXY` hoists its token regex to module scope and drops a per-call lookup object.
+- `clipBbox` drops a redundant antimeridian guard: the single width and height check at the end
+  rejects those boxes, and a comment now explains why that is sufficient.
+- The NOAA bounds constants follow one naming scheme (`NOAA_ENC_BOUNDS`, `NOAA_MPA_BOUNDS`), and
+  the registry cites the WMTS GetCapabilities tile matrix that justifies the BlueTopo 512 pixel
+  tile size.
+- The npm keywords now list all five upstream modes.
+- Dev dependencies: `@types/node` added (pinned to the Node 20 engines floor), and the `tsx` and
+  `typescript` ranges brought current.
+
+### Fixed
+
+- A stale comment in `src/types.ts` called the tile cache by its old working name; it now says
+  Chart Locker like every other file.
+
 <a id="v010"></a>
 
 ## [0.1.0] - 2026-06-30

@@ -29,15 +29,18 @@ installed directly by users.
 
 ## Layout
 
-- `src/registry.ts`: the `CHART_SOURCES` catalog. `src/types.ts`: `ChartSource` and the
-  `UpstreamTemplate` union. `src/mercator.ts`: the Web Mercator tile math. `src/expand.ts`: the
-  upstream URL builder and the proxy tile template. `src/estimate.ts`: the byte estimate.
-  `src/index.ts`: the barrel of public exports. `test/`: node --test suites, one per module.
+- `src/registry.ts`: the `CHART_SOURCES` catalog and the `chartSourceById` lookup. `src/types.ts`:
+  `ChartSource`, the `UpstreamTemplate` union, and the shared `Bbox`, `ZoomRange`, and `ChartGroup`
+  types. `src/mercator.ts`: the Web Mercator tile math. `src/expand.ts`: the upstream URL builder
+  and the proxy tile template. `src/estimate.ts`: the byte estimate. `src/index.ts`: the barrel of
+  public exports. `test/`: node --test suites, one per module, plus the shared `makeSource` fixture
+  in `test/fixtures.ts`.
 
 ## Build and test
 
-- `npm run build` (tsc to `dist/`), `npm run typecheck`, and `npm test` (node --test via tsx). There
-  is no lint step. CI runs build, typecheck, and test on Node 20 and 22.
+- `npm run build` (tsc to `dist/`), `npm run typecheck` (the src project plus `tsconfig.test.json`,
+  so the tests type-check under the same strict settings), and `npm test` (node --test via tsx).
+  There is no lint step. CI runs build, typecheck, and test on Node 20 and 22.
 - Conventions: a bbox tuple is [west, south, east, north] (longitude before latitude); tile
   coordinates are z/x/y with y increasing downward.
 
