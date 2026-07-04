@@ -1,7 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CHART_SOURCES } from '../src/registry.js'
+import { CHART_SOURCES, chartSourceById } from '../src/registry.js'
 import { expandUpstreamUrl } from '../src/expand.js'
+import type { Bbox, ChartSource } from '../src/types.js'
+
+// A typo'd id must fail the test, not silently return undefined, so lookups assert.
+const src = (id: string): ChartSource => {
+  const s = chartSourceById(id)
+  assert.ok(s, `${id} must be in the catalog`)
+  return s
+}
 
 test('every source id is unique', () => {
   const ids = CHART_SOURCES.map((s) => s.id)
@@ -20,42 +28,55 @@ test('the basemap is the single style source and carries an allowed host', () =>
   const styles = CHART_SOURCES.filter((s) => s.upstream.mode === 'style')
   assert.equal(styles.length, 1)
   const basemap = styles[0]
+  assert.ok(basemap, 'the style source must exist')
   assert.equal(basemap.id, 'basemap')
-  assert.equal(basemap.upstream.mode, 'style')
-  if (basemap.upstream.mode === 'style') {
-    assert.deepEqual(basemap.upstream.allowedHosts, ['tiles.openfreemap.org'])
-  }
+  assert.ok(basemap.upstream.mode === 'style')
+  assert.deepEqual(basemap.upstream.allowedHosts, ['tiles.openfreemap.org'])
 })
 
 test('key sources pin their transcribed upstream data (drift guard)', () => {
-  const gebco = CHART_SOURCES.find((s) => s.id === 'depth-gebco')
-  assert.ok(gebco && gebco.upstream.mode === 'wms')
-  if (gebco && gebco.upstream.mode === 'wms') {
-    assert.equal(gebco.upstream.base, 'https://wms.gebco.net/mapserv')
-    assert.equal(gebco.upstream.layers, 'GEBCO_LATEST')
-  }
-  const enc = CHART_SOURCES.find((s) => s.id === 'depth-noaa-enc')
-  assert.ok(enc && enc.upstream.mode === 'wms')
-  if (enc && enc.upstream.mode === 'wms') assert.equal(enc.upstream.layers, '0,1,2,3,4,5,6,7,10')
-  const bluetopo = CHART_SOURCES.find((s) => s.id === 'depth-bluetopo')
-  assert.equal(bluetopo?.tileSize, 512)
-  assert.equal(bluetopo?.upstream.mode, 'wmts')
+  const gebco = src('depth-gebco')
+  assert.ok(gebco.upstream.mode === 'wms')
+  assert.equal(gebco.upstream.base, 'https://wms.gebco.net/mapserv')
+  assert.equal(gebco.upstream.layers, 'GEBCO_LATEST')
+  const enc = src('depth-noaa-enc')
+  assert.ok(enc.upstream.mode === 'wms')
+  assert.equal(enc.upstream.layers, '0,1,2,3,4,5,6,7,10')
+  const bluetopo = src('depth-bluetopo')
+  assert.equal(bluetopo.tileSize, 512)
+  assert.equal(bluetopo.upstream.mode, 'wmts')
+  const seamark = src('seamark')
+  assert.ok(seamark.upstream.mode === 'xyz')
+  assert.equal(seamark.upstream.urlTemplate, 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png')
+  const mpaNoaa = src('mpa-noaa')
+  assert.ok(mpaNoaa.upstream.mode === 'arcgis')
+  assert.equal(
+    mpaNoaa.upstream.base,
+    'https://gis.charttools.noaa.gov/arcgis/rest/services/survey_priorities2_national/MPA_Inventory_Separates/MapServer'
+  )
+  const basemap = src('basemap')
+  assert.ok(basemap.upstream.mode === 'style')
+  assert.equal(basemap.upstream.styleUrl, 'https://tiles.openfreemap.org/styles/liberty')
+})
+
+test('chartSourceById returns the catalog entry or undefined', () => {
+  assert.equal(chartSourceById('depth-gebco')?.title, 'GEBCO bathymetry')
+  assert.equal(chartSourceById('does-not-exist'), undefined)
 })
 
 test('chart bounds separate US and EU coverage so defaults and the summary stay honest', () => {
-  const byId = Object.fromEntries(CHART_SOURCES.map((s) => [s.id, s]))
-  const inBox = (b, lng, lat) =>
+  const inBox = (b: Bbox | undefined, lng: number, lat: number): boolean =>
     b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
   // NOAA ENC is US only: a Mediterranean point (Naples) is outside it; a US point (Newport) is inside.
-  assert.equal(inBox(byId['depth-noaa-enc'].bounds, 14.25, 40.8), false)
-  assert.equal(inBox(byId['depth-noaa-enc'].bounds, -71.3, 41.5), true)
+  assert.equal(inBox(src('depth-noaa-enc').bounds, 14.25, 40.8), false)
+  assert.equal(inBox(src('depth-noaa-enc').bounds, -71.3, 41.5), true)
   // EMODnet is EU only: a US northeast point (Boston) is outside it; an EU point (English Channel) is inside.
-  assert.equal(inBox(byId['depth-emodnet'].bounds, -71, 42.3), false)
-  assert.equal(inBox(byId['depth-emodnet'].bounds, 0, 50), true)
+  assert.equal(inBox(src('depth-emodnet').bounds, -71, 42.3), false)
+  assert.equal(inBox(src('depth-emodnet').bounds, 0, 50), true)
   // The EU protected-area layers now carry bounds so they self-hide outside Europe.
-  assert.ok(byId['mpa-emodnet'].bounds)
-  assert.ok(byId['mpa-natura2000'].bounds)
-  assert.equal(inBox(byId['mpa-emodnet'].bounds, -71, 42.3), false)
+  assert.ok(src('mpa-emodnet').bounds)
+  assert.ok(src('mpa-natura2000').bounds)
+  assert.equal(inBox(src('mpa-emodnet').bounds, -71, 42.3), false)
 })
 
 test('every source has a sane zoom range and a vectorMaxzoom within maxzoom', () => {
@@ -74,13 +95,29 @@ test('every bounded source has a finite, non-degenerate west, south, east, north
     assert.ok([west, south, east, north].every(Number.isFinite), `${s.id} bounds must be finite`)
     assert.ok(west < east, `${s.id} west ${west} must be less than east ${east}`)
     assert.ok(south < north, `${s.id} south ${south} must be less than north ${north}`)
+    assert.ok(west >= -180 && east <= 180, `${s.id} longitudes must fall within [-180, 180]`)
+    assert.ok(south >= -90 && north <= 90, `${s.id} latitudes must fall within [-90, 90]`)
+  }
+})
+
+test('sources sharing a group id share one group title and one attribution', () => {
+  const members = new Map<string, ChartSource[]>()
+  for (const s of CHART_SOURCES) {
+    if (!s.group) continue
+    const list = members.get(s.group.id) ?? []
+    list.push(s)
+    members.set(s.group.id, list)
+  }
+  for (const [id, group] of members) {
+    assert.equal(new Set(group.map((m) => m.group?.title)).size, 1, `group ${id} must carry one title`)
+    assert.equal(new Set(group.map((m) => m.attribution)).size, 1, `group ${id} must share one attribution`)
   }
 })
 
 test('BlueTopo bounds pin the US extent from the service capabilities (drift guard)', () => {
-  const bluetopo = CHART_SOURCES.find((s) => s.id === 'depth-bluetopo')
-  assert.ok(bluetopo?.bounds, 'depth-bluetopo must carry bounds')
+  const bluetopo = src('depth-bluetopo')
+  assert.ok(bluetopo.bounds, 'depth-bluetopo must carry bounds')
   // South is a positive latitude and east is a negative longitude; a regression to the earlier
   // South Atlantic and European box fails here.
-  assert.deepEqual(bluetopo?.bounds, [-138.0, 16.786, -64.198, 59.55])
+  assert.deepEqual(bluetopo.bounds, [-138.0, 16.786, -64.198, 59.55])
 })

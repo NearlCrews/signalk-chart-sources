@@ -1,13 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { expandUpstreamUrl, proxyTileTemplate } from '../src/expand.js'
-import type { ChartSource } from '../src/types.js'
+import { makeSource } from './fixtures.js'
 
-const xyz: ChartSource = { id: 'x', title: 'X', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'xyz', urlTemplate: 'https://h/{z}/{x}/{y}.png' } }
-const wmts: ChartSource = { id: 'w', title: 'W', tileSize: 512, minzoom: 0, maxzoom: 16, attribution: '', upstream: { mode: 'wmts', urlTemplate: 'https://h/wmts?TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}' } }
-const wms: ChartSource = { id: 's', title: 'S', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'wms', base: 'https://w/wms', layers: '0,1', styles: 'q', version: '1.3.0', format: 'image/png', transparent: true } }
-const arcgis: ChartSource = { id: 'a', title: 'A', tileSize: 256, minzoom: 0, maxzoom: 18, attribution: '', upstream: { mode: 'arcgis', base: 'https://m/MapServer' } }
-const style: ChartSource = { id: 'b', title: 'B', tileSize: 256, minzoom: 0, maxzoom: 20, vectorMaxzoom: 14, attribution: '', upstream: { mode: 'style', styleUrl: 'https://tiles.example/styles/liberty', allowedHosts: ['tiles.example'] } }
+const xyz = makeSource({ id: 'x', title: 'X' })
+const wmts = makeSource({ id: 'w', title: 'W', tileSize: 512, maxzoom: 16, upstream: { mode: 'wmts', urlTemplate: 'https://h/wmts?TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}' } })
+const wms = makeSource({ id: 's', title: 'S', upstream: { mode: 'wms', base: 'https://w/wms', layers: '0,1', styles: 'q', version: '1.3.0', format: 'image/png', transparent: true } })
+const arcgis = makeSource({ id: 'a', title: 'A', upstream: { mode: 'arcgis', base: 'https://m/MapServer' } })
+const style = makeSource({ id: 'b', title: 'B', maxzoom: 20, vectorMaxzoom: 14, upstream: { mode: 'style', styleUrl: 'https://tiles.example/styles/liberty', allowedHosts: ['tiles.example'] } })
 
 test('xyz substitutes z, x, and y', () => {
   assert.equal(expandUpstreamUrl(xyz, 3, 2, 1), 'https://h/3/2/1.png')
@@ -30,7 +30,7 @@ test('wms injects the 3857 bbox, CRS, size, layers, and styles', () => {
   assert.equal(url.searchParams.get('STYLES'), 'q')
   const bbox = (url.searchParams.get('BBOX') ?? '').split(',').map(Number)
   assert.equal(bbox.length, 4)
-  assert.ok(Math.abs(bbox[0] - -20037508.342789244) < 1e-3)
+  assert.ok(Math.abs((bbox[0] ?? Number.NaN) - -20037508.342789244) < 1e-3)
 })
 
 test('a style source returns its style URL unchanged', () => {
