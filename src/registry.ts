@@ -1,4 +1,4 @@
-import type { ChartSource } from './types.js'
+import type { Bbox, ChartGroup, ChartSource } from './types.js'
 
 // Every v1 upstream, transcribed from the Binnacle chartplotter source modules so the webapp render
 // config and the companion proxy allowlist never drift. The webapp augments these with its UI-only
@@ -12,14 +12,14 @@ const BLUETOPO_WMS = 'https://nowcoast.noaa.gov/geoserver/bluetopo/wms'
 const MARINE_REGIONS_WMS = 'https://geo.vliz.be/geoserver/MarineRegions/wms'
 const NOAA_MPA_SERVER = 'https://gis.charttools.noaa.gov/arcgis/rest/services/survey_priorities2_national/MPA_Inventory_Separates/MapServer'
 
-const EMODNET_BOUNDS: [number, number, number, number] = [-30.0, 25.0, 43.0, 84.0]
+const EMODNET_BOUNDS: Bbox = [-30.0, 25.0, 43.0, 84.0]
 // The BlueTopo geographic extent from the service GetCapabilities (bluetopo:bathymetry): US waters
 // spanning longitude -138 to -64.198 (all western hemisphere, so all negative) and latitude 16.786 to
 // 59.55 north. The tuple is [minLng, minLat, maxLng, maxLat]; do not clip the longitudes to positive
 // values, which an earlier bounds error did and which drops the whole extent.
-const BLUETOPO_BOUNDS: [number, number, number, number] = [-138.0, 16.786, -64.198, 59.55]
-const ENC_BOUNDS: [number, number, number, number] = [-180, 17, -64, 72]
-const MPA_NOAA_BOUNDS: [number, number, number, number] = [-180, 15, -60, 75]
+const BLUETOPO_BOUNDS: Bbox = [-138.0, 16.786, -64.198, 59.55]
+const NOAA_ENC_BOUNDS: Bbox = [-180, 17, -64, 72]
+const NOAA_MPA_BOUNDS: Bbox = [-180, 15, -60, 75]
 
 // Attribution strings shared by more than one source, named so a correction cannot land on one copy
 // and miss the other.
@@ -39,7 +39,7 @@ const EMODNET_MPA_GROUP = { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
 /** Build a WMS GetMap ChartSource (256 px, EPSG:3857, image/png, transparent), matching the webapp wmsTiles. */
 function wms (
   id: string, title: string, base: string, layers: string, styles: string,
-  extra: { minzoom?: number, maxzoom?: number, bounds?: [number, number, number, number], attribution: string, group?: { id: string, title: string } }
+  extra: { minzoom?: number, maxzoom?: number, bounds?: Bbox, attribution: string, group?: ChartGroup }
 ): ChartSource {
   return {
     id, title, tileSize: 256,
@@ -61,6 +61,9 @@ export const CHART_SOURCES: ChartSource[] = [
     maxzoom: 12, bounds: EMODNET_BOUNDS, attribution: EMODNET_BATHY_ATTR, group: EMODNET_GROUP
   }),
   {
+    // tileSize 512 matches the upstream: the nowcoast GWC EPSG:3857 tile matrix set serves
+    // 512 by 512 tiles per its WMTS GetCapabilities, and bluetopo:bathymetry publishes only
+    // that matrix set.
     id: 'depth-bluetopo', title: 'BlueTopo bathymetry', tileSize: 512,
     minzoom: 0, maxzoom: 16, bounds: BLUETOPO_BOUNDS,
     attribution: BLUETOPO_ATTR,
@@ -71,10 +74,10 @@ export const CHART_SOURCES: ChartSource[] = [
     maxzoom: 16, bounds: BLUETOPO_BOUNDS, attribution: BLUETOPO_ATTR, group: BLUETOPO_GROUP
   }),
   wms('depth-noaa-enc', 'NOAA ENC', NOAA_ENC_WMS, '0,1,2,3,4,5,6,7,10', '', {
-    bounds: ENC_BOUNDS, attribution: NOAA_ENC_ATTR, group: NOAA_ENC_GROUP
+    bounds: NOAA_ENC_BOUNDS, attribution: NOAA_ENC_ATTR, group: NOAA_ENC_GROUP
   }),
   wms('depth-noaa-enc-quality', 'Data quality (ZOC)', NOAA_ENC_WMS, '8,9', '', {
-    bounds: ENC_BOUNDS, attribution: NOAA_ENC_ATTR, group: NOAA_ENC_GROUP
+    bounds: NOAA_ENC_BOUNDS, attribution: NOAA_ENC_ATTR, group: NOAA_ENC_GROUP
   }),
   {
     id: 'seamark', title: 'OpenSeaMap seamarks', tileSize: 256,
@@ -95,7 +98,7 @@ export const CHART_SOURCES: ChartSource[] = [
   }),
   {
     id: 'mpa-noaa', title: 'NOAA MPA inventory', tileSize: 256,
-    minzoom: 0, maxzoom: 18, bounds: MPA_NOAA_BOUNDS,
+    minzoom: 0, maxzoom: 18, bounds: NOAA_MPA_BOUNDS,
     attribution: 'NOAA National Marine Protected Areas Center',
     upstream: { mode: 'arcgis', base: NOAA_MPA_SERVER }
   },
@@ -106,3 +109,10 @@ export const CHART_SOURCES: ChartSource[] = [
     upstream: { mode: 'style', styleUrl: 'https://tiles.openfreemap.org/styles/liberty', allowedHosts: ['tiles.openfreemap.org'] }
   }
 ]
+
+const BY_ID = new Map(CHART_SOURCES.map((s) => [s.id, s]))
+
+/** Look up a source by its stable id; undefined for an id not in the catalog. */
+export function chartSourceById (id: string): ChartSource | undefined {
+  return BY_ID.get(id)
+}

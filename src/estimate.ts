@@ -1,10 +1,9 @@
-import { CHART_SOURCES } from './registry.js'
+import type { Bbox, ZoomRange } from './types.js'
+import { chartSourceById } from './registry.js'
 import { tileCountInBbox } from './mercator.js'
 
 /** Fallback per-tile size for a source never cached yet, so an estimate still gates a first download. */
 export const DEFAULT_TILE_BYTES = 25_000
-
-const byId = new Map(CHART_SOURCES.map((s) => [s.id, s]))
 
 /**
  * The upper-bound byte estimate: sum over sourceIds of tileCountInBbox times the per-source average
@@ -13,13 +12,13 @@ const byId = new Map(CHART_SOURCES.map((s) => [s.id, s]))
  */
 export function estimateBytes (
   sourceIds: string[],
-  bbox: [number, number, number, number],
-  zoomRange: [number, number],
+  bbox: Bbox,
+  zoomRange: ZoomRange,
   perSourceAvgBytes: Record<string, number>
 ): number {
   let total = 0
   for (const id of sourceIds) {
-    const source = byId.get(id)
+    const source = chartSourceById(id)
     if (!source) continue
     const tiles = tileCountInBbox(source, bbox, zoomRange)
     const avg = perSourceAvgBytes[id] ?? DEFAULT_TILE_BYTES

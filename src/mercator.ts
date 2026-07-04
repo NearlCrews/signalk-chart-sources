@@ -1,4 +1,4 @@
-import type { ChartSource } from './types.js'
+import type { Bbox, ChartSource, ZoomRange } from './types.js'
 
 // Half the web-mercator extent in meters (EPSG:3857). The webapp and the container both use this one
 // constant, so the TS and Rust copies are bit-exact.
@@ -10,7 +10,7 @@ const ORIGIN = 20037508.342789244
  * the bbox, so any sub-ULP difference from MapLibre is irrelevant; the only hard requirement is that
  * this and the Rust container copy agree, which they do (same formula, constant, and IEEE-754).
  */
-export function webMercatorTileBounds (z: number, x: number, y: number): [number, number, number, number] {
+export function webMercatorTileBounds (z: number, x: number, y: number): Bbox {
   const size = (2 * ORIGIN) / 2 ** z
   const minX = -ORIGIN + x * size
   const maxX = minX + size
@@ -28,6 +28,8 @@ export const MAX_MERCATOR_LAT = 85.0511287798066
  * of webMercatorTileBounds. Unlike the forward direction it need not be bit-exact across the TS and the
  * Rust; it only selects which integer tiles to enumerate, and those tiles then flow through the same
  * forward expand path and produce the same cache key. The Rust container carries the same formula.
+ * Latitude clamps to MAX_MERCATOR_LAT explicitly; longitude has no named clamp and instead lands in
+ * range through the final tile-index clamp, so an out-of-range longitude yields the edge tile.
  */
 export function tileForLngLat (lng: number, lat: number, z: number): { x: number, y: number } {
   const n = 2 ** z
@@ -44,15 +46,18 @@ export function tileForLngLat (lng: number, lat: number, z: number): { x: number
 
 export type ZXY = { z: number, x: number, y: number }
 
+const isFiniteBbox = (b: Bbox): boolean => b.every(Number.isFinite)
+
 // Clip the request bbox to the source bounds and the Mercator latitude limit, and reject a non-finite,
-// degenerate, or antimeridian-crossing (minLng > maxLng) box. Returns null when nothing remains.
-function clipBbox (source: ChartSource, bbox: [number, number, number, number]): [number, number, number, number] | null {
+// degenerate, or antimeridian-crossing (minLng > maxLng) box. The single width and height check at the
+// end catches the degenerate and the antimeridian cases alike, because clipping against the source
+// bounds can only narrow an interval, never re-invert it. Returns null when nothing remains.
+function clipBbox (source: ChartSource, bbox: Bbox): Bbox | null {
+  if (!isFiniteBbox(bbox)) return null
   let [minLng, minLat, maxLng, maxLat] = bbox
-  if (![minLng, minLat, maxLng, maxLat].every(Number.isFinite)) return null
-  if (minLng > maxLng) return null
   if (source.bounds) {
+    if (!isFiniteBbox(source.bounds)) return null
     const [bMinLng, bMinLat, bMaxLng, bMaxLat] = source.bounds
-    if (![bMinLng, bMinLat, bMaxLng, bMaxLat].every(Number.isFinite)) return null
     minLng = Math.max(minLng, bMinLng)
     minLat = Math.max(minLat, bMinLat)
     maxLng = Math.min(maxLng, bMaxLng)
@@ -64,13 +69,13 @@ function clipBbox (source: ChartSource, bbox: [number, number, number, number]):
   return [minLng, minLat, maxLng, maxLat]
 }
 
-function zoomBounds (source: ChartSource, [zmin, zmax]: [number, number]): [number, number] {
+function zoomBounds (source: ChartSource, [zmin, zmax]: ZoomRange): ZoomRange {
   return [Math.max(zmin, source.minzoom), Math.min(zmax, source.maxzoom, source.vectorMaxzoom ?? source.maxzoom)]
 }
 
 // The inclusive tile rectangle [x0..x1] by [y0..y1] covering the clipped bbox at zoom z. y increases
 // downward, so the north edge (maxLat) is the smaller y.
-function tileRange (clip: [number, number, number, number], z: number): { x0: number, x1: number, y0: number, y1: number } {
+function tileRange (clip: Bbox, z: number): { x0: number, x1: number, y0: number, y1: number } {
   const [minLng, minLat, maxLng, maxLat] = clip
   const tl = tileForLngLat(minLng, maxLat, z)
   const br = tileForLngLat(maxLng, minLat, z)
@@ -80,7 +85,7 @@ function tileRange (clip: [number, number, number, number], z: number): { x0: nu
 // The inclusive tile rectangle per zoom level covering the clipped bbox, shared by the count and the
 // enumeration below so the clip, zoom-clamp, and per-level tileForLngLat walk are spelled once.
 function coveredRanges (
-  source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]
+  source: ChartSource, bbox: Bbox, zoomRange: ZoomRange
 ): Array<{ z: number, x0: number, x1: number, y0: number, y1: number }> {
   const clip = clipBbox(source, bbox)
   if (!clip) return []
@@ -93,7 +98,7 @@ function coveredRanges (
 }
 
 /** The number of tiles that would be covered over this bbox and zoom range. Upper-bound gate for the panel estimate. */
-export function tileCountInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): number {
+export function tileCountInBbox (source: ChartSource, bbox: Bbox, zoomRange: ZoomRange): number {
   let count = 0
   for (const { x0, x1, y0, y1 } of coveredRanges(source, bbox, zoomRange)) {
     count += (x1 - x0 + 1) * (y1 - y0 + 1)
@@ -102,7 +107,7 @@ export function tileCountInBbox (source: ChartSource, bbox: [number, number, num
 }
 
 /** Enumerate every z/x/y that would be covered over this bbox and zoom range. */
-export function tilesInBbox (source: ChartSource, bbox: [number, number, number, number], zoomRange: [number, number]): ZXY[] {
+export function tilesInBbox (source: ChartSource, bbox: Bbox, zoomRange: ZoomRange): ZXY[] {
   const ranges = coveredRanges(source, bbox, zoomRange)
   let total = 0
   for (const { x0, x1, y0, y1 } of ranges) total += (x1 - x0 + 1) * (y1 - y0 + 1)

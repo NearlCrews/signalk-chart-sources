@@ -11,9 +11,10 @@ function assertInRange (source: ChartSource, z: number, x: number, y: number): v
   if (x < 0 || x >= span || y < 0 || y >= span) throw new RangeError(`x/y ${x}/${y} out of range at z ${z}`)
 }
 
+const ZXY_TOKEN = /\{(z|x|y)\}/g
+
 function substituteZXY (template: string, z: number, x: number, y: number): string {
-  const value: Record<'z' | 'x' | 'y', string> = { z: String(z), x: String(x), y: String(y) }
-  return template.replace(/\{(z|x|y)\}/g, (_, key) => value[key as 'z' | 'x' | 'y'])
+  return template.replace(ZXY_TOKEN, (_, key) => String(key === 'z' ? z : key === 'x' ? x : y))
 }
 
 /** The EPSG:3857 tile bbox as the comma-joined BBOX parameter shared by the wms and arcgis requests. */

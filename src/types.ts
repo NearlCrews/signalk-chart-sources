@@ -1,6 +1,21 @@
 // One definition of every upstream chart and raster overlay source, shared by the Binnacle
-// chartplotter webapp (which renders them) and the Binnacle Companion tile cache (which proxies and
+// chartplotter webapp (which renders them) and the Chart Locker tile cache (which proxies and
 // caches them). Data and pure helpers only: no MapLibre, no Signal K, no Node or browser APIs.
+
+/**
+ * An axis-aligned box as [minX, minY, maxX, maxY]. Geographic boxes are [west, south, east, north]
+ * in degrees; webMercatorTileBounds returns the same shape in EPSG:3857 meters.
+ */
+export type Bbox = [number, number, number, number]
+
+/** An inclusive [minzoom, maxzoom] pair. */
+export type ZoomRange = [number, number]
+
+/** A group descriptor shared by a source and its facets, so the webapp can aggregate them. */
+export interface ChartGroup {
+  id: string
+  title: string
+}
 
 /**
  * What the CONTAINER needs to build the upstream request. The browser-facing path is always
@@ -29,7 +44,8 @@ export interface ChartSource {
    * Present on a vector style source; the warm and the estimate clamp to it so they never request
    * vector tiles above the level the upstream actually serves. */
   vectorMaxzoom?: number
-  bounds?: [number, number, number, number]
+  /** Geographic coverage as [west, south, east, north] degrees; omitted means worldwide. */
+  bounds?: Bbox
   attribution: string
-  group?: { id: string, title: string }
+  group?: ChartGroup
 }
