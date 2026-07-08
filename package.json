@@ -1,6 +1,6 @@
 {
   "name": "signalk-chart-sources",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Shared definitions of the chart and raster overlay sources for the Binnacle chartplotter and the Chart Locker tile cache.",
   "type": "module",
   "main": "dist/index.js",

@@ -82,11 +82,12 @@ const bytes = estimateBytes(['depth-gebco'], bbox, zoomRange, {})
 
 ## Source catalog
 
-The catalog holds 14 sources across five upstream modes (XYZ, WMTS, WMS `GetMap`, ArcGIS Export, and
+The catalog holds 16 sources across five upstream modes (XYZ, WMTS, WMS `GetMap`, ArcGIS Export, and
 vector style):
 
 - Bathymetry overlays: GEBCO, EMODnet (with a quality index), BlueTopo (with an uncertainty layer),
-  and NOAA ENC (with a data-quality layer).
+  NOAA ENC (with a data-quality layer), and Seascape (globally merged depth shading, contours,
+  soundings, and drying areas).
 - Seamarks: OpenSeaMap.
 - Maritime boundaries: exclusive economic zones and the 12 nautical mile territorial sea from Marine
   Regions.

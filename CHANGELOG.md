@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+<a id="v021"></a>
+
+## [0.2.1] - 2026-07-07
+
+### Added
+
+- **Seascape bathymetry.** Two new catalog entries, `seascape-dem` (a raster-dem elevation source,
+  512 px tiles) and `seascape-vector` (contours, soundings, and drying areas), both plain XYZ
+  templates against `tiles.openwaters.io`, so the Chart Locker proxy allowlist recognizes the ids
+  the Binnacle chartplotter now renders.
+
 <a id="v020"></a>
 
 ## [0.2.0] - 2026-07-04
