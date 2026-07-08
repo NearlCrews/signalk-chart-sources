@@ -57,6 +57,13 @@ test('key sources pin their transcribed upstream data (drift guard)', () => {
   const basemap = src('basemap')
   assert.ok(basemap.upstream.mode === 'style')
   assert.equal(basemap.upstream.styleUrl, 'https://tiles.openfreemap.org/styles/liberty')
+  const seascapeDem = src('seascape-dem')
+  assert.ok(seascapeDem.upstream.mode === 'xyz')
+  assert.equal(seascapeDem.upstream.urlTemplate, 'https://tiles.openwaters.io/seascape/{z}/{x}/{y}.webp')
+  assert.equal(seascapeDem.tileSize, 512)
+  const seascapeVector = src('seascape-vector')
+  assert.ok(seascapeVector.upstream.mode === 'xyz')
+  assert.equal(seascapeVector.upstream.urlTemplate, 'https://tiles.openwaters.io/seascape/{z}/{x}/{y}.pbf')
 })
 
 test('chartSourceById returns the catalog entry or undefined', () => {
