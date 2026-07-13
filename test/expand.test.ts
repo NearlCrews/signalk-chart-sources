@@ -35,6 +35,7 @@ test('wms injects the 3857 bbox, CRS, size, layers, and styles', () => {
 
 test('a style source returns its style URL unchanged', () => {
   assert.equal(expandUpstreamUrl(style, 0, 0, 0), 'https://tiles.example/styles/liberty')
+  assert.throws(() => expandUpstreamUrl(style, -1, 0, 0), RangeError)
 })
 
 test('arcgis builds the export query with the tile bbox', () => {
@@ -54,4 +55,7 @@ test('an out-of-range tile coordinate throws', () => {
 
 test('proxyTileTemplate builds the plugin-facing tile template', () => {
   assert.equal(proxyTileTemplate('/plugins/signalk-chart-locker', 'depth-gebco'), '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}')
+  assert.equal(proxyTileTemplate('/plugins/signalk-chart-locker/', 'depth-gebco'), '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}')
+  assert.throws(() => proxyTileTemplate('', 'depth-gebco'), TypeError)
+  assert.throws(() => proxyTileTemplate('/plugins/signalk-chart-locker', '../secret'), TypeError)
 })

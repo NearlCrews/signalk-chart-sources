@@ -4,6 +4,53 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Release entries describe behavior at the time of that release. See the README for the current API
+contract and the Unreleased section for pending compatibility changes.
+
+## [Unreleased]
+
+## [0.3.0] - 2026-07-13
+
+### Added
+
+- Antimeridian-aware tile counting and enumeration, disjoint source coverage, lazy tile iteration,
+  defensive enumeration limits, unit-specific bbox type names, and public source validation.
+- Conservative per-source and per-mode first-download estimates with strict numeric and source-id
+  validation.
+- Property-style tile invariants, package-tarball smoke tests, coverage thresholds, and a scheduled
+  upstream service and capabilities monitor.
+- Repository-specific contributor guidance in `AGENTS.md`.
+
+### Changed
+
+- `CHART_SOURCES` and all nested catalog values are deeply readonly and frozen.
+- Public tile helpers reject invalid coordinates, zooms, boxes, and source metadata explicitly.
+- NOAA ENC bounds now match the geographic envelope in the live WMS capabilities.
+- The supported Node.js floor is 22, and CI covers Node.js 22, 24, and 26.
+- npm package exports are explicit, and the package declares itself side-effect-free.
+- Release publishing uses a tested tarball, pinned GitHub Actions, and a protected environment. The
+  workflow is prepared for npm trusted publishing without a long-lived write token.
+- Development uses TypeScript 7.0.2, `@types/node` 26.1.1, `tsx` 4.23.1, and an explicit allowlist
+  for the `esbuild` install script required by `tsx`.
+
+### Migration
+
+- Node.js 20 consumers must upgrade to Node.js 22 or newer.
+- Treat `CHART_SOURCES`, nested source objects, bbox tuples, zoom tuples, and host arrays as readonly.
+- Handle `RangeError` or `TypeError` from invalid geometry, coordinates, zooms, source definitions,
+  source ids, averages, enumeration limits, and unsafe numeric totals.
+- Review `tilesInBbox` callers against the 1,000,000-tile default limit. Use `tileCountInBbox` before
+  enumeration and use `iterateTilesInBbox` for bounded streaming.
+- Expect antimeridian-crossing boxes to return deduplicated east-edge and west-edge tiles instead of
+  an empty result.
+- Do not rely on unknown source ids being skipped by `estimateBytes`; they now fail closed.
+
+### Fixed
+
+- Large valid regions can no longer crash `tilesInBbox` through an impossible array allocation.
+- Invalid or missing estimate statistics can no longer return negative, non-finite, or unsafe totals.
+- Mutating exported catalog data can no longer desynchronize `CHART_SOURCES` and `chartSourceById`.
+
 <a id="v021"></a>
 
 ## [0.2.1] - 2026-07-07
@@ -89,3 +136,9 @@ drift. Data and pure helpers only: no MapLibre, no Signal K, and no Node or brow
   constant (25,000) when a source has never been cached. Exporting one implementation lets the Chart
   Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
   re-validation agrees with the panel estimate. Unknown source ids are skipped.
+
+[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/NearlCrews/signalk-chart-sources/releases/tag/v0.1.0

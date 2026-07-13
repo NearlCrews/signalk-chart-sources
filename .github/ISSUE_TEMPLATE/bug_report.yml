@@ -14,7 +14,7 @@ body:
     attributes:
       label: Description
       description: A clear summary of the bug.
-      placeholder: tilesInBbox returns tiles outside the source bounds near the antimeridian.
+      placeholder: estimateBytes accepts an invalid measured average for a known source.
     validations:
       required: true
 
@@ -24,9 +24,10 @@ body:
       label: Steps to reproduce
       description: A minimal code sample and the inputs that trigger the bug.
       placeholder: |
-        import { CHART_SOURCES, tilesInBbox } from 'signalk-chart-sources'
-        const source = CHART_SOURCES.find((s) => s.id === 'seamark')
-        const tiles = tilesInBbox(source, [179, 0, -179, 1], [0, 4])
+        import { chartSourceById, tilesInBbox } from 'signalk-chart-sources'
+        const source = chartSourceById('seamark')
+        if (!source) throw new Error('source unavailable')
+        const tiles = tilesInBbox(source, [-83, 41, -82, 42], [0, 4])
       render: text
     validations:
       required: true
@@ -51,10 +52,12 @@ body:
       label: Affected area
       options:
         - Source registry (CHART_SOURCES)
-        - Web Mercator tile math (webMercatorTileBounds, tileForLngLat, tilesInBbox, tileCountInBbox)
+        - Source validation and coverage
+        - Web Mercator tile math, counting, and enumeration
         - Upstream URL building (expandUpstreamUrl, proxyTileTemplate)
-        - Byte estimate (estimateBytes, DEFAULT_TILE_BYTES)
-        - Types (ChartSource, UpstreamTemplate)
+        - Byte estimates and fallbacks
+        - Public types and readonly contracts
+        - Package, CI, release, or upstream monitor
         - Other
     validations:
       required: true
@@ -70,7 +73,7 @@ body:
     id: package-version
     attributes:
       label: Package version
-      placeholder: 0.1.0
+      placeholder: 0.3.0
     validations:
       required: true
 
@@ -78,7 +81,7 @@ body:
     id: node-version
     attributes:
       label: Node.js version
-      placeholder: 20.18.0
+      placeholder: 24.18.0
     validations:
       required: true
 

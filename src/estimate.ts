@@ -1,28 +1,55 @@
-import type { Bbox, ZoomRange } from './types.js'
+import type { LngLatBbox, UpstreamTemplate, ZoomRange } from './types.js'
 import { chartSourceById } from './registry.js'
 import { tileCountInBbox } from './mercator.js'
 
-/** Fallback per-tile size for a source never cached yet, so an estimate still gates a first download. */
-export const DEFAULT_TILE_BYTES = 25_000
+/** Conservative generic fallback when a source has no more specific first-download estimate. */
+export const DEFAULT_TILE_BYTES = 512_000
+
+/** Frozen first-download fallbacks keyed by upstream mode. A source-specific value takes priority. */
+export const DEFAULT_TILE_BYTES_BY_MODE: Readonly<Record<UpstreamTemplate['mode'], number>> = Object.freeze({
+  xyz: 512_000,
+  wmts: 1_000_000,
+  wms: 512_000,
+  arcgis: 512_000,
+  style: 750_000
+})
+
+function validatedAverage (id: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`average tile bytes for ${id} must be a positive safe integer`)
+  }
+  return value
+}
 
 /**
- * The upper-bound byte estimate: sum over sourceIds of tileCountInBbox times the per-source average
- * (with the DEFAULT_TILE_BYTES fallback). Takes the average map, not a webapp CacheStats, so the
- * plugin can re-validate server-side without depending on the webapp. Unknown ids are skipped.
+ * Return a conservative planning estimate for known sources and an inclusive zoom range.
+ *
+ * @throws {RangeError} When a source id is unknown, an average is not a positive safe integer, tile
+ * inputs are invalid, or the result exceeds Number.MAX_SAFE_INTEGER.
+ *
+ * The consuming server must still enforce actual tile-count and transferred-byte limits because
+ * compressed tile size varies and no average can be a mathematical upper bound.
  */
 export function estimateBytes (
-  sourceIds: string[],
-  bbox: Bbox,
+  sourceIds: readonly string[],
+  bbox: LngLatBbox,
   zoomRange: ZoomRange,
-  perSourceAvgBytes: Record<string, number>
+  perSourceAvgBytes: Readonly<Record<string, number>>
 ): number {
   let total = 0
   for (const id of sourceIds) {
     const source = chartSourceById(id)
-    if (!source) continue
+    if (!source) throw new RangeError(`unknown chart source: ${id}`)
     const tiles = tileCountInBbox(source, bbox, zoomRange)
-    const avg = perSourceAvgBytes[id] ?? DEFAULT_TILE_BYTES
-    total += tiles * avg
+    const measured = perSourceAvgBytes[id]
+    const avg = measured === undefined
+      ? source.fallbackTileBytes ?? DEFAULT_TILE_BYTES_BY_MODE[source.upstream.mode] ?? DEFAULT_TILE_BYTES
+      : validatedAverage(id, measured)
+    const sourceTotal = tiles * avg
+    if (!Number.isSafeInteger(sourceTotal) || !Number.isSafeInteger(total + sourceTotal)) {
+      throw new RangeError('byte estimate exceeds the safe integer limit')
+    }
+    total += sourceTotal
   }
   return total
 }

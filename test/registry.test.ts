@@ -71,11 +71,11 @@ test('chartSourceById returns the catalog entry or undefined', () => {
   assert.equal(chartSourceById('does-not-exist'), undefined)
 })
 
-test('chart bounds separate US and EU coverage so defaults and the summary stay honest', () => {
+test('chart bounds preserve service coverage envelopes', () => {
   const inBox = (b: Bbox | undefined, lng: number, lat: number): boolean =>
     b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
-  // NOAA ENC is US only: a Mediterranean point (Naples) is outside it; a US point (Newport) is inside.
-  assert.equal(inBox(src('depth-noaa-enc').bounds, 14.25, 40.8), false)
+  // NOAA ENC reports a global service envelope because it includes remote US chart coverage.
+  assert.equal(inBox(src('depth-noaa-enc').bounds, 144.8, 13.5), true)
   assert.equal(inBox(src('depth-noaa-enc').bounds, -71.3, 41.5), true)
   // EMODnet is EU only: a US northeast point (Boston) is outside it; an EU point (English Channel) is inside.
   assert.equal(inBox(src('depth-emodnet').bounds, -71, 42.3), false)
@@ -84,6 +84,15 @@ test('chart bounds separate US and EU coverage so defaults and the summary stay 
   assert.ok(src('mpa-emodnet').bounds)
   assert.ok(src('mpa-natura2000').bounds)
   assert.equal(inBox(src('mpa-emodnet').bounds, -71, 42.3), false)
+})
+
+test('the catalog and every nested source object are immutable', () => {
+  assert.ok(Object.isFrozen(CHART_SOURCES))
+  const source = src('depth-gebco')
+  assert.ok(Object.isFrozen(source))
+  assert.ok(Object.isFrozen(source.upstream))
+  assert.throws(() => (CHART_SOURCES as unknown as ChartSource[]).pop(), TypeError)
+  assert.equal(chartSourceById('depth-gebco'), source)
 })
 
 test('every source has a sane zoom range and a vectorMaxzoom within maxzoom', () => {

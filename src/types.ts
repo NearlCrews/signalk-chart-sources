@@ -1,51 +1,73 @@
 // One definition of every upstream chart and raster overlay source, shared by the Binnacle
-// chartplotter webapp (which renders them) and the Chart Locker tile cache (which proxies and
-// caches them). Data and pure helpers only: no MapLibre, no Signal K, no Node or browser APIs.
+// chartplotter webapp and the Chart Locker tile cache. Data and pure helpers only.
+
+/** A geographic box in degrees as [west, south, east, north]. west > east crosses the antimeridian. */
+export type LngLatBbox = readonly [west: number, south: number, east: number, north: number]
+
+/** An EPSG:3857 box in meters as [minX, minY, maxX, maxY]. */
+export type MercatorBbox = readonly [minX: number, minY: number, maxX: number, maxY: number]
 
 /**
- * An axis-aligned box as [minX, minY, maxX, maxY]. Geographic boxes are [west, south, east, north]
- * in degrees; webMercatorTileBounds returns the same shape in EPSG:3857 meters.
+ * Backward-compatible geographic bbox name. New code should prefer LngLatBbox so degree and meter
+ * boxes remain visibly distinct at API boundaries.
  */
-export type Bbox = [number, number, number, number]
+export type Bbox = LngLatBbox
 
 /** An inclusive [minzoom, maxzoom] pair. */
-export type ZoomRange = [number, number]
+export type ZoomRange = readonly [minzoom: number, maxzoom: number]
 
 /** A group descriptor shared by a source and its facets, so the webapp can aggregate them. */
 export interface ChartGroup {
-  id: string
-  title: string
+  readonly id: string
+  readonly title: string
 }
 
-/**
- * What the CONTAINER needs to build the upstream request. The browser-facing path is always
- * /tile/{source}/{z}/{x}/{y} (or /style/{source} for the basemap); the container expands this per
- * `mode`. The source id (see ChartSource) fully determines every non-z/x/y parameter (LAYERS, STYLES,
- * tile size, GIBS date), so the upstream request is reproducible from the id plus z/x/y alone.
- */
+/** Everything required to build or authorize an upstream request. */
 export type UpstreamTemplate =
-  | { mode: 'xyz', urlTemplate: string }
-  | { mode: 'wmts', urlTemplate: string }
-  | { mode: 'wms', base: string, layers: string, styles: string, version: '1.3.0', format: string, transparent: boolean }
-  | { mode: 'arcgis', base: string }
-  | { mode: 'style', styleUrl: string, allowedHosts: string[] }
+  | { readonly mode: 'xyz', readonly urlTemplate: string }
+  | { readonly mode: 'wmts', readonly urlTemplate: string }
+  | {
+    readonly mode: 'wms'
+    readonly base: string
+    readonly layers: string
+    readonly styles: string
+    readonly version: '1.3.0'
+    readonly format: string
+    readonly transparent: boolean
+  }
+  | { readonly mode: 'arcgis', readonly base: string }
+  | {
+    readonly mode: 'style'
+    readonly styleUrl: string
+    readonly allowedHosts: readonly string[]
+  }
 
-/** A chart or raster overlay source. The webapp builds its render config from this; the plugin
- * builds the container allowlist from this. One list, two consumers, no drift. */
+/** A chart or raster overlay source shared by the renderer and tile cache. */
 export interface ChartSource {
-  /** Stable id, fully determines every non-z/x/y parameter. */
-  id: string
-  title: string
-  upstream: UpstreamTemplate
-  tileSize: 256 | 512
-  minzoom: number
-  maxzoom: number
-  /** The native vector-tile maxzoom, distinct from maxzoom (the MapLibre overzoom render ceiling).
-   * Present on a vector style source; the warm and the estimate clamp to it so they never request
-   * vector tiles above the level the upstream actually serves. */
-  vectorMaxzoom?: number
-  /** Geographic coverage as [west, south, east, north] degrees; omitted means worldwide. */
-  bounds?: Bbox
-  attribution: string
-  group?: ChartGroup
+  /** Stable path-safe id that fully determines every non-z/x/y request parameter. */
+  readonly id: string
+  readonly title: string
+  readonly upstream: UpstreamTemplate
+  readonly tileSize: 256 | 512
+  readonly minzoom: number
+  readonly maxzoom: number
+  /** Native vector-tile maximum zoom, distinct from the MapLibre overzoom render ceiling. */
+  readonly vectorMaxzoom?: number
+  /** Geographic display envelope. Omitted means worldwide. May cross the antimeridian. */
+  readonly bounds?: LngLatBbox
+  /**
+   * Optional disjoint warming and estimate coverage. This is preferred over bounds for services
+   * whose useful coverage cannot be represented by one rectangle. Entries may cross the
+   * antimeridian and are deduplicated by tile helpers when they overlap.
+   */
+  readonly coverage?: readonly LngLatBbox[]
+  /** Conservative first-download estimate used until a measured average exists. */
+  readonly fallbackTileBytes?: number
+  readonly attribution: string
+  readonly group?: ChartGroup
+}
+
+export interface TileEnumerationOptions {
+  /** Maximum tiles the call may enumerate before it fails closed. */
+  readonly maxTiles?: number
 }

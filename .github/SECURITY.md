@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-We actively support the following versions with security updates:
+Security fixes target the latest published release:
 
-| Version | Supported |
-| ------- | --------- |
-| 0.1.x   | Yes       |
-| < 0.1   | No        |
+| Version              | Supported |
+| -------------------- | --------- |
+| Latest published release | Yes    |
+| Earlier releases         | No     |
 
 ## Reporting a Vulnerability
 
@@ -43,32 +43,41 @@ Please include the following information in your report:
 
 When depending on this package:
 
-1. **Keep Updated**: always use the latest version.
-2. **Review Dependencies**: regularly update your dependency tree and run `npm audit`.
-3. **Validate Inputs**: the tile-math and URL-building helpers assume the caller passes bounded,
-   finite coordinates; validate untrusted input before handing it to them.
+1. **Keep Updated**: use the latest published version and review its migration notes.
+2. **Validate Inputs**: treat coordinates, boxes, zooms, source definitions, source ids, enumeration
+   limits, and estimate statistics as untrusted at application boundaries.
+3. **Enforce Limits**: use count and estimate helpers for planning, then enforce request
+   authorization, maximum tile counts, and actual transferred-byte limits in the consuming server.
+4. **Handle Errors**: do not convert validation errors into unrestricted or worldwide requests.
 
 ## Dependency Security
 
 This package has zero runtime dependencies. The only third-party code is the development
-toolchain (TypeScript and tsx). We use:
+toolchain. We use:
 
 - `npm audit` for vulnerability scanning
 - Automated dependency updates via Dependabot for security patches
+- Full commit SHA pins for GitHub Actions
+- npm OIDC trusted publishing and a reviewer-protected deployment environment for releases
 
 Run a security audit:
 
 ```bash
 npm audit
+npm audit --omit=dev
 ```
 
 ## Data Handling
 
-signalk-chart-sources is a pure library of static data and stateless helper functions. It makes
-no network requests, opens no files, reads no environment, and handles no credentials or personal
-data of any kind. The `expandUpstreamUrl` and `proxyTileTemplate` helpers build URL strings; the
-consuming application is what performs the actual tile fetches. The catalog lists the public chart
-and raster overlay services those requests target, with no embedded keys or tokens.
+The published runtime is a pure library of static data and stateless helper functions. It makes no
+network requests, opens no files, reads no environment, and handles no credentials or personal data.
+The `expandUpstreamUrl` and `proxyTileTemplate` helpers build URL strings; the consuming application
+performs the tile fetches. The catalog contains public services and no embedded keys or tokens.
+
+The repository's maintenance scripts are different from the published runtime:
+
+- `scripts/check-upstreams.ts` performs explicit live requests to public catalog services.
+- `scripts/package-smoke.mjs` creates and removes a temporary directory while verifying the tarball.
 
 ## Signal K Security
 

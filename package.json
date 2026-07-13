@@ -1,18 +1,29 @@
 {
   "name": "signalk-chart-sources",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Shared definitions of the chart and raster overlay sources for the Binnacle chartplotter and the Chart Locker tile cache.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "MIGRATING.md"
   ],
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=85 test/*.test.ts",
+    "test:package": "npm run build && node scripts/package-smoke.mjs",
+    "test:upstreams": "node --import tsx scripts/check-upstreams.ts"
   },
   "keywords": [
     "signalk",
@@ -28,7 +39,7 @@
     "chart-sources"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "author": {
     "name": "Nearl Crews",
@@ -44,8 +55,11 @@
     "url": "https://github.com/NearlCrews/signalk-chart-sources/issues"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
-    "tsx": "^4.23.0",
-    "typescript": "^5.9.3"
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
   }
 }

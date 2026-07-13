@@ -1,5 +1,5 @@
-// Type-checks the test suites with the same strictness as src. The build config keeps
-// rootDir src, so tests get their own noEmit project instead of loosening the build.
+// Type-checks tests and maintenance scripts with the same strictness as src. The build config keeps
+// rootDir src, so non-published files use their own noEmit project instead of loosening the build.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -7,5 +7,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "scripts"]
 }

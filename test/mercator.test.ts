@@ -1,6 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { tileForLngLat, webMercatorTileBounds, tilesInBbox, tileCountInBbox, MAX_MERCATOR_LAT } from '../src/mercator.js'
+import {
+  tileForLngLat,
+  webMercatorTileBounds,
+  tilesInBbox,
+  iterateTilesInBbox,
+  tileCountInBbox,
+  MAX_MERCATOR_LAT
+} from '../src/mercator.js'
 import { CHART_SOURCES } from '../src/registry.js'
 import type { Bbox, ZoomRange } from '../src/types.js'
 import { makeSource } from './fixtures.js'
@@ -86,17 +93,22 @@ test('the bbox clips to the source bounds', () => {
   )
 })
 
-test('an antimeridian-crossing box is rejected (empty) in v2', () => {
-  assert.deepEqual(tilesInBbox(makeSource(), [170, -10, -170, 10], [3, 3]), [])
-  assert.equal(tileCountInBbox(makeSource(), [170, -10, -170, 10], [3, 3]), 0)
+test('an antimeridian-crossing box splits across the east and west edge without duplicates', () => {
+  const tiles = tilesInBbox(makeSource(), [170, -10, -170, 10], [3, 3])
+  assert.deepEqual(tiles, [
+    { z: 3, x: 0, y: 3 },
+    { z: 3, x: 0, y: 4 },
+    { z: 3, x: 7, y: 3 },
+    { z: 3, x: 7, y: 4 }
+  ])
+  assert.equal(tileCountInBbox(makeSource(), [170, -10, -170, 10], [3, 3]), tiles.length)
+  assert.equal(tileCountInBbox(makeSource(), [170, -10, -170, 10], [0, 0]), 1)
 })
 
-test('a non-finite or degenerate box yields nothing', () => {
-  assert.equal(tileCountInBbox(makeSource(), [Number.NaN, 0, 1, 1], [2, 2]), 0)
-  assert.equal(tileCountInBbox(makeSource(), [5, 5, 5, 5], [2, 2]), 0)
-  // Enumeration takes the same guard path as the count, exercised here so both are covered.
-  assert.deepEqual(tilesInBbox(makeSource(), [Number.NaN, 0, 1, 1], [2, 2]), [])
-  assert.deepEqual(tilesInBbox(makeSource(), [5, 5, 5, 5], [2, 2]), [])
+test('a non-finite or degenerate box fails explicitly', () => {
+  assert.throws(() => tileCountInBbox(makeSource(), [Number.NaN, 0, 1, 1], [2, 2]), RangeError)
+  assert.throws(() => tileCountInBbox(makeSource(), [5, 5, 5, 5], [2, 2]), RangeError)
+  assert.throws(() => tilesInBbox(makeSource(), [-181, 0, 1, 1], [2, 2]), RangeError)
 })
 
 test('tileCountInBbox clamps a vector source to vectorMaxzoom even when asked for a higher zoom', () => {
@@ -106,4 +118,50 @@ test('tileCountInBbox clamps a vector source to vectorMaxzoom even when asked fo
   const wide = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 16])
   const at14 = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 14])
   assert.equal(wide, at14, 'the count clamps to vectorMaxzoom (14), so z15 and z16 add nothing')
+})
+
+test('tile math rejects non-finite coordinates and invalid zooms', () => {
+  assert.throws(() => tileForLngLat(Number.NaN, 0, 1), RangeError)
+  assert.throws(() => tileForLngLat(0, Number.POSITIVE_INFINITY, 1), RangeError)
+  assert.throws(() => tileForLngLat(0, 0, 1.5), RangeError)
+  assert.throws(() => tileForLngLat(0, 0, -1), RangeError)
+  assert.throws(() => webMercatorTileBounds(1, 2, 0), RangeError)
+  assert.throws(() => tileCountInBbox(makeSource(), [-1, -1, 1, 1], [3, 2]), RangeError)
+})
+
+test('enumeration fails before allocating an unsafe array and supports lazy iteration', () => {
+  const world: Bbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
+  assert.equal(tileCountInBbox(makeSource(), world, [16, 16]), 4_294_967_296)
+  assert.throws(() => tilesInBbox(makeSource(), world, [16, 16]), /exceeds maxTiles/)
+  assert.deepEqual(
+    [...iterateTilesInBbox(makeSource(), [-10, -10, 10, 10], [1, 1], { maxTiles: 10 })],
+    tilesInBbox(makeSource(), [-10, -10, 10, 10], [1, 1])
+  )
+})
+
+test('disjoint source coverage clips, merges, and deduplicates tile ranges', () => {
+  const source = makeSource({
+    bounds: [-180, -20, 180, 20],
+    coverage: [[170, -10, 180, 10], [-180, -10, -170, 10]]
+  })
+  assert.equal(tileCountInBbox(source, [160, -15, -160, 15], [0, 0]), 1)
+  assert.deepEqual([...new Set(tilesInBbox(source, [160, -15, -160, 15], [2, 2]).map(({ x }) => x))], [0, 3])
+})
+
+test('deterministic bbox samples preserve count, uniqueness, and coordinate invariants', () => {
+  let seed = 0x5eed1234
+  const random = (): number => {
+    seed = (1664525 * seed + 1013904223) >>> 0
+    return seed / 2 ** 32
+  }
+  for (let sample = 0; sample < 100; sample++) {
+    const west = -179 + random() * 340
+    const south = -80 + random() * 140
+    const bbox: Bbox = [west, south, Math.min(179, west + 0.1 + random() * 10), Math.min(84, south + 0.1 + random() * 10)]
+    const z = Math.floor(random() * 9)
+    const tiles = tilesInBbox(makeSource(), bbox, [z, z], { maxTiles: 20_000 })
+    assert.equal(tiles.length, tileCountInBbox(makeSource(), bbox, [z, z]))
+    assert.equal(new Set(tiles.map(({ z, x, y }) => `${z}/${x}/${y}`)).size, tiles.length)
+    assert.ok(tiles.every(({ x, y }) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < 2 ** z && y < 2 ** z))
+  }
 })
