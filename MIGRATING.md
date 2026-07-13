@@ -53,6 +53,6 @@ Binnacle already requires Node.js 22, but its estimate integration requires revi
 
 ## Release ordering
 
-Publish 0.3.0 first, then update each consumer in its own reviewed change. Do not widen an existing
-0.2.x range. Verify Binnacle and Chart Locker independently against the published package and commit
-their refreshed lockfiles.
+Publish the 0.3.x package first, then update each consumer in its own reviewed change. Do not widen
+an existing 0.2.x range. Verify Binnacle and Chart Locker independently against the published
+package and commit their refreshed lockfiles.

@@ -61,4 +61,4 @@ jobs:
         with:
           name: npm-package
           path: package
-      - run: npm publish package/*.tgz --access public
+      - run: npm publish ./package/*.tgz --access public
