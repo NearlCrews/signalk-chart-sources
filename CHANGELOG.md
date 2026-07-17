@@ -9,6 +9,8 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-17
+
 ### Added
 
 - Add a Binnacle-style repository toolchain with Biome, Markdown linting, spelling, Knip dead-code
@@ -177,7 +179,8 @@ drift. Data and pure helpers only: no MapLibre, no Signal K, and no Node or brow
   Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
   re-validation agrees with the panel estimate. Unknown source ids are skipped.
 
-[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.2.0...v0.2.1
