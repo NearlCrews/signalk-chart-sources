@@ -11,6 +11,12 @@ function assertInRange(source: ChartSource, z: number, x: number, y: number): vo
 
 const ZXY_TOKEN = /\{(z|x|y)\}/g
 
+function withoutTrailingSlashes(value: string): string {
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end--
+  return value.slice(0, end)
+}
+
 function substituteZXY(template: string, z: number, x: number, y: number): string {
   return template.replace(ZXY_TOKEN, (_, key) => String(key === 'z' ? z : key === 'x' ? x : y))
 }
@@ -47,7 +53,7 @@ export function expandUpstreamUrl(source: ChartSource, z: number, x: number, y: 
     }
     case 'arcgis': {
       const bbox = mercatorBboxParam(z, x, y)
-      const base = u.base.replace(/\/+$/, '')
+      const base = withoutTrailingSlashes(u.base)
       return (
         `${base}/export?bbox=${bbox}&bboxSR=3857&imageSR=3857` +
         `&size=${source.tileSize},${source.tileSize}&dpi=96&format=png32&transparent=true&f=image`
@@ -71,7 +77,7 @@ export function expandUpstreamUrl(source: ChartSource, z: number, x: number, y: 
  * @throws {TypeError} When the normalized base is empty or the source id is not path-safe.
  */
 export function proxyTileTemplate(pluginBase: string, sourceId: string): string {
-  const base = pluginBase.replace(/\/+$/, '')
+  const base = withoutTrailingSlashes(pluginBase)
   if (base === '') throw new TypeError('pluginBase must not be empty')
   if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(sourceId)) {
     throw new TypeError(`invalid source id: ${sourceId}`)

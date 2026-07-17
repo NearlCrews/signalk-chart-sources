@@ -69,10 +69,10 @@ test('arcgis builds the export query with the tile bbox', () => {
   assert.equal(url.searchParams.get('size'), '256,256')
 })
 
-test('arcgis normalizes a trailing slash before appending export', () => {
+test('arcgis normalizes trailing slashes before appending export', () => {
   const trailing = makeSource({
     id: 'a',
-    upstream: { mode: 'arcgis', base: 'https://m/MapServer/' }
+    upstream: { mode: 'arcgis', base: `https://m/MapServer${'/'.repeat(1_024)}` }
   })
   const url = new URL(expandUpstreamUrl(trailing, 1, 0, 0))
   assert.equal(url.pathname, '/MapServer/export')
@@ -92,7 +92,7 @@ test('proxyTileTemplate builds the plugin-facing tile template', () => {
     '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}'
   )
   assert.equal(
-    proxyTileTemplate('/plugins/signalk-chart-locker/', 'depth-gebco'),
+    proxyTileTemplate(`/plugins/signalk-chart-locker${'/'.repeat(10_000)}`, 'depth-gebco'),
     '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}'
   )
   assert.throws(() => proxyTileTemplate('', 'depth-gebco'), TypeError)

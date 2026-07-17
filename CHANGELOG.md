@@ -36,6 +36,8 @@ contract and the Unreleased section for pending compatibility changes.
 
 ### Fixed
 
+- Normalize trailing slashes with a linear scan to prevent polynomial-time processing of hostile
+  ArcGIS and plugin base strings.
 - Reject `[180, south, -180, north]` as a zero-longitude-span bbox in counting, array enumeration,
   lazy iteration, source validation, and the Rust tile-cache mirror.
 - Document and test the existing inclusive tile-boundary behavior used for conservative warming.
