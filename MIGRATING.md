@@ -1,12 +1,10 @@
-# Migrating to 0.3.0
+# Migration guide
 
-Version 0.3.0 is a breaking pre-1.0 release. Existing `^0.2.x` dependency ranges do not select it,
-so consumers can migrate and test deliberately.
+## Migrating from 0.3.x to 0.4.0
 
-## Unreleased validation hardening
-
-The pending changes tighten the 0.3.x fail-closed contract. Consumers that construct source objects
-outside the built-in catalog should review these requirements before selecting the next release:
+Version 0.4.0 is a breaking pre-1.0 release. Existing `^0.3.x` dependency ranges do not select it,
+so consumers can migrate and test deliberately. Consumers that construct source objects outside the
+built-in catalog must review these tightened fail-closed requirements:
 
 - `validateChartSource` now accepts `unknown`, checks the complete runtime structure, and narrows a
   successful value to `ChartSource`. Missing, sparse, incorrectly typed, and unknown mode values are
@@ -25,7 +23,12 @@ outside the built-in catalog should review these requirements before selecting t
 The Rust mirror in Chart Locker must be updated with the package so direct container configuration
 cannot accept a source that the TypeScript boundary rejects.
 
-## All consumers
+## Migrating from 0.2.x to 0.3.x
+
+Version 0.3.0 is a breaking pre-1.0 release. Existing `^0.2.x` dependency ranges do not select it,
+so consumers can migrate and test deliberately.
+
+### All consumers
 
 1. Upgrade the runtime and development environment to Node.js 22 or newer.
 2. Change the dependency to `^0.3.0`, refresh the lockfile, and run the consumer's complete checks.
@@ -42,7 +45,7 @@ cannot accept a source that the TypeScript boundary rejects.
 8. Review NOAA ENC behavior because its display bounds now use the service-level capabilities
    envelope and may include transparent tiles outside actual chart coverage.
 
-## Chart Locker
+### Chart Locker
 
 Chart Locker requires code and metadata changes before upgrading:
 
@@ -58,7 +61,7 @@ Chart Locker requires code and metadata changes before upgrading:
 - Type-check the plugin, container payload, route tests, and packed Signal K plugin before changing
   its dependency range.
 
-## Binnacle
+### Binnacle
 
 Binnacle already requires Node.js 22, but its estimate integration requires review:
 
@@ -73,7 +76,7 @@ Binnacle already requires Node.js 22, but its estimate integration requires revi
 - Add region-selection coverage for antimeridian boxes and the revised NOAA ENC envelope.
 - Type-check and build the webapp before changing its dependency range.
 
-## Release ordering
+### Release ordering
 
 Publish the 0.3.x package first, then update each consumer in its own reviewed change. Do not widen
 an existing 0.2.x range. Verify Binnacle and Chart Locker independently against the published
