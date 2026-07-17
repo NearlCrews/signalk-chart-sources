@@ -52,14 +52,8 @@ corresponding npm automation token, and confirm the workflow still publishes wit
 
    ```bash
    npm ci
-   npm run typecheck
-   npm test
-   npm run test:coverage
-   npm run build
-   npm run test:package
+   npm run verify
    npm run test:upstreams
-   npm audit
-   npm audit --omit=dev
    git diff --check
    ```
 
@@ -74,13 +68,14 @@ corresponding npm automation token, and confirm the workflow still publishes wit
 
 1. Obtain explicit final approval to create the version tag and GitHub release.
 2. Create an annotated `v<version>` tag on the verified commit and push it.
-3. Create and publish the GitHub release from that tag. The workflow rejects a tag that does not match
-   `package.json`.
-4. The verify job installs the lockfile, builds, type-checks, runs tests and coverage, smoke-tests the
-   installed package, creates one tarball, and uploads that exact artifact.
+3. Create a stable, non-prerelease GitHub release from that tag. The workflow rejects a tag that does
+   not match `package.json`, a prerelease version, or a commit that is not reachable from `main`.
+4. The verify job installs the lockfile, runs repository quality checks, builds, type-checks, runs
+   tests, coverage, and audits, creates one tarball, validates it with Publint, smoke-tests its runtime
+   and declarations in an installed consumer, and uploads that exact artifact.
 5. Inspect the pending deployment, then approve the protected `npm` environment. This is the final
    approval before npm publication.
-6. The publish job downloads the verified tarball and publishes it through npm OIDC.
+6. The publish job downloads the verified tarball and publishes it through npm OIDC with provenance.
 
 ## Verify publication
 
@@ -88,8 +83,8 @@ Confirm all of the following against the published version:
 
 - The npm `latest` dist-tag points to the intended version.
 - Package provenance links to the expected repository, workflow, tag, and commit.
-- The tarball contains `dist`, declarations, `package.json`, `README.md`, and `LICENSE`, with no source
-  tests, maintenance scripts, or local files.
+- The tarball contains `dist`, declarations, `package.json`, `README.md`, `CHANGELOG.md`,
+  `MIGRATING.md`, and `LICENSE`, with no source tests, maintenance scripts, or local files.
 - A clean ESM project can install and import the package root.
 - The published declarations resolve under `moduleResolution: NodeNext`.
 - GitHub CI and the publish workflow are green on the tagged commit.

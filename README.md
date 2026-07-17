@@ -50,7 +50,9 @@ import { chartSourceById, tileCountInBbox } from 'signalk-chart-sources'
 - `CHART_SOURCES`: the deeply frozen, readonly catalog.
 - `chartSourceById(id)`: return the immutable source with that stable id, or `undefined`.
 - `validateChartSource(source)`: validate a built-in or consumer-supplied source and throw on an
-  invalid id, zoom range, URL, bounds, coverage, fallback size, or mode-specific requirement.
+  invalid runtime shape, id, zoom range, URL, bounds, coverage, fallback size, or mode-specific
+  requirement. Its assertion signature accepts `unknown` and narrows successful values to
+  `ChartSource`.
 - `ChartSource`, `UpstreamTemplate`, and `ChartGroup`: public catalog types.
 
 Each `ChartSource` may contain:
@@ -74,7 +76,8 @@ metadata instead of mutating catalog entries.
 - `TileEnumerationOptions`: currently `{ maxTiles?: number }`.
 
 A longitude-latitude box crosses the antimeridian when `west > east`. Degenerate boxes, invalid
-latitudes or longitudes, and non-finite values throw `RangeError`.
+latitudes or longitudes, and non-finite values throw `RangeError`. `[180, south, -180, north]` has a
+zero longitude span and is invalid even though its west value is greater than its east value.
 
 ### Tile math
 
@@ -91,7 +94,9 @@ latitudes or longitudes, and non-finite values throw `RangeError`.
 - `DEFAULT_MAX_ENUMERATED_TILES`: the defensive default enumeration limit.
 
 Tile helpers validate source metadata, coordinates, zooms, zoom ordering, and safe-integer counts.
-Invalid inputs throw instead of returning partial or ambiguous results.
+Invalid inputs throw instead of returning partial or ambiguous results. Geographic bbox edges are
+inclusive for conservative warming, so a box ending exactly on a tile boundary includes the tile on
+both sides of that boundary.
 
 ### URL construction
 
@@ -101,6 +106,11 @@ Invalid inputs throw instead of returning partial or ambiguous results.
   the path-safe source id, and return the Chart Locker tile template.
 
 `expandUpstreamUrl` only constructs a string. The consuming application performs the network request.
+Source validation requires bounded HTTPS URLs without credentials or fragments. XYZ and WMTS
+templates may contain only `{z}`, `{x}`, and `{y}` tokens. WMS and ArcGIS base URLs may not contain
+query parameters, WMS version must be `1.3.0`, and WMS layer, style, and format values may not inject
+query delimiters. Style hosts are validated, deduplicated case-insensitively, and must authorize the
+style URL itself.
 
 ### Download planning
 
@@ -163,7 +173,9 @@ The catalog currently holds 16 sources:
 
 Source ids, upstream layer names, styles, URLs, dimensions, bounds, and attribution are load-bearing
 configuration. The scheduled upstream monitor samples every source and compares selected capability
-metadata. Verify the upstream service before changing catalog data.
+metadata. It parses configured WMS layers, styles, formats, CRS support, WMTS matrix definitions, and
+the complete transitive style and TileJSON host graph. Verify the upstream service before changing
+catalog data.
 
 ## Migrating to 0.3.0
 
@@ -189,13 +201,13 @@ checklist and the known Binnacle and Chart Locker changes.
 git clone https://github.com/NearlCrews/signalk-chart-sources.git
 cd signalk-chart-sources
 npm ci
-npm run typecheck
-npm test
-npm run test:coverage
-npm run build
-npm run test:package
-npm audit
+npm run verify
 ```
+
+The development gate follows the same practical toolchain used by Binnacle: Biome formatting and
+linting, Markdown linting, spelling, Knip dead-code and cycle checks, workflow invariant checks,
+strict TypeScript, native tests and coverage, Publint, exact-tarball consumer smoke tests, builds,
+and dependency audits. Run `npm run verify:commit` for the fast repository-quality subset.
 
 `npm run test:upstreams` performs live requests to every configured source and selected capabilities.
 Run it when catalog or monitor behavior changes. It is scheduled separately and intentionally excluded

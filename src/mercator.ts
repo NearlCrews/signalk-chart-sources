@@ -1,10 +1,4 @@
-import type {
-  ChartSource,
-  LngLatBbox,
-  MercatorBbox,
-  TileEnumerationOptions,
-  ZoomRange
-} from './types.js'
+import type { ChartSource, LngLatBbox, MercatorBbox, TileEnumerationOptions, ZoomRange } from './types.js'
 import {
   assertFiniteNumber,
   assertLngLatBbox,
@@ -18,7 +12,7 @@ import {
 const ORIGIN = 20037508.342789244
 
 /** Return EPSG:3857 bounds for a valid XYZ tile, or throw RangeError for invalid coordinates. */
-export function webMercatorTileBounds (z: number, x: number, y: number): MercatorBbox {
+export function webMercatorTileBounds(z: number, x: number, y: number): MercatorBbox {
   assertTileCoordinate(z, x, y)
   const size = (2 * ORIGIN) / 2 ** z
   const minX = -ORIGIN + x * size
@@ -34,7 +28,7 @@ export const MAX_MERCATOR_LAT = 85.0511287798066
  * Return the integer XYZ tile containing a finite longitude-latitude point.
  * Latitude clamps to the Web Mercator limit, and finite longitude clamps to an edge tile.
  */
-export function tileForLngLat (lng: number, lat: number, z: number): { x: number, y: number } {
+export function tileForLngLat(lng: number, lat: number, z: number): { x: number; y: number } {
   assertFiniteNumber(lng, 'longitude')
   assertFiniteNumber(lat, 'latitude')
   assertZoom(z)
@@ -50,13 +44,13 @@ export function tileForLngLat (lng: number, lat: number, z: number): { x: number
   }
 }
 
-export type ZXY = Readonly<{ z: number, x: number, y: number }>
+export type ZXY = Readonly<{ z: number; x: number; y: number }>
 
-type TileRange = Readonly<{ z: number, x0: number, x1: number, y0: number, y1: number }>
+type TileRange = Readonly<{ z: number; x0: number; x1: number; y0: number; y1: number }>
 
 export const DEFAULT_MAX_ENUMERATED_TILES = 1_000_000
 
-function splitBbox (bbox: LngLatBbox): LngLatBbox[] {
+function splitBbox(bbox: LngLatBbox): LngLatBbox[] {
   assertLngLatBbox(bbox)
   const [west, south, east, north] = bbox
   if (west < east) return [[west, south, east, north]]
@@ -66,7 +60,7 @@ function splitBbox (bbox: LngLatBbox): LngLatBbox[] {
   ]
 }
 
-function intersectBboxes (left: LngLatBbox, right: LngLatBbox): LngLatBbox | null {
+function intersectBboxes(left: LngLatBbox, right: LngLatBbox): LngLatBbox | null {
   const west = Math.max(left[0], right[0])
   const south = Math.max(left[1], right[1], -MAX_MERCATOR_LAT)
   const east = Math.min(left[2], right[2])
@@ -74,7 +68,7 @@ function intersectBboxes (left: LngLatBbox, right: LngLatBbox): LngLatBbox | nul
   return west < east && south < north ? [west, south, east, north] : null
 }
 
-function clipBboxes (source: ChartSource, bbox: LngLatBbox): LngLatBbox[] {
+function clipBboxes(source: ChartSource, bbox: LngLatBbox): LngLatBbox[] {
   const requested = splitBbox(bbox)
   const coverage = source.coverage ?? (source.bounds ? [source.bounds] : [[-180, -90, 180, 90] as const])
   const sourceBoxes = coverage.flatMap(splitBbox)
@@ -88,16 +82,13 @@ function clipBboxes (source: ChartSource, bbox: LngLatBbox): LngLatBbox[] {
   return intersections
 }
 
-function zoomBounds (source: ChartSource, zoomRange: ZoomRange): ZoomRange {
+function zoomBounds(source: ChartSource, zoomRange: ZoomRange): ZoomRange {
   assertZoomRange(zoomRange)
   const [zmin, zmax] = zoomRange
-  return [
-    Math.max(zmin, source.minzoom),
-    Math.min(zmax, source.maxzoom, source.vectorMaxzoom ?? source.maxzoom)
-  ]
+  return [Math.max(zmin, source.minzoom), Math.min(zmax, source.maxzoom, source.vectorMaxzoom ?? source.maxzoom)]
 }
 
-function tileRange (clip: LngLatBbox, z: number): TileRange {
+function tileRange(clip: LngLatBbox, z: number): TileRange {
   const [west, south, east, north] = clip
   const topLeft = tileForLngLat(west, north, z)
   const bottomRight = tileForLngLat(east, south, z)
@@ -105,7 +96,7 @@ function tileRange (clip: LngLatBbox, z: number): TileRange {
 }
 
 /** Convert possibly overlapping rectangles into disjoint x slabs with merged y intervals. */
-function disjointRanges (ranges: readonly TileRange[]): TileRange[] {
+function disjointRanges(ranges: readonly TileRange[]): TileRange[] {
   const byZoom = new Map<number, TileRange[]>()
   for (const range of ranges) {
     const list = byZoom.get(range.z) ?? []
@@ -141,7 +132,7 @@ function disjointRanges (ranges: readonly TileRange[]): TileRange[] {
   return out.sort((a, b) => a.z - b.z || a.x0 - b.x0 || a.y0 - b.y0)
 }
 
-function coveredRanges (source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): TileRange[] {
+function coveredRanges(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): TileRange[] {
   validateChartSource(source)
   const clips = clipBboxes(source, bbox)
   const [zmin, zmax] = zoomBounds(source, zoomRange)
@@ -153,7 +144,7 @@ function coveredRanges (source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRa
   return disjointRanges(ranges)
 }
 
-function countRanges (ranges: readonly TileRange[]): number {
+function countRanges(ranges: readonly TileRange[]): number {
   let count = 0
   for (const { x0, x1, y0, y1 } of ranges) {
     count += (x1 - x0 + 1) * (y1 - y0 + 1)
@@ -162,7 +153,7 @@ function countRanges (ranges: readonly TileRange[]): number {
   return count
 }
 
-function enumerationLimit (options: TileEnumerationOptions): number {
+function enumerationLimit(options: TileEnumerationOptions): number {
   const limit = options.maxTiles ?? DEFAULT_MAX_ENUMERATED_TILES
   if (!Number.isSafeInteger(limit) || limit <= 0) {
     throw new RangeError('maxTiles must be a positive safe integer')
@@ -174,7 +165,7 @@ function enumerationLimit (options: TileEnumerationOptions): number {
  * Count distinct covered tiles without allocating the tile list. Antimeridian boxes and overlapping
  * coverage regions are split and deduplicated. Invalid inputs and unsafe totals throw RangeError.
  */
-export function tileCountInBbox (source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): number {
+export function tileCountInBbox(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): number {
   return countRanges(coveredRanges(source, bbox, zoomRange))
 }
 
@@ -182,7 +173,7 @@ export function tileCountInBbox (source: ChartSource, bbox: LngLatBbox, zoomRang
  * Lazily enumerate distinct covered tiles. The full count is validated against maxTiles before the
  * first value is yielded.
  */
-export function * iterateTilesInBbox (
+export function* iterateTilesInBbox(
   source: ChartSource,
   bbox: LngLatBbox,
   zoomRange: ZoomRange,
@@ -200,7 +191,7 @@ export function * iterateTilesInBbox (
 }
 
 /** Enumerate distinct covered tiles into an array, subject to a defensive maximum size. */
-export function tilesInBbox (
+export function tilesInBbox(
   source: ChartSource,
   bbox: LngLatBbox,
   zoomRange: ZoomRange,

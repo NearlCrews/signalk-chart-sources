@@ -29,8 +29,7 @@ byte estimate are all in scope.
 2. Install the locked dependency tree with `npm ci`.
 3. Make focused commits with clear messages (see below).
 4. Add tests for any new functionality and keep the existing suites green.
-5. Run `npm run typecheck`, `npm test`, `npm run test:coverage`, `npm run build`,
-   `npm run test:package`, `npm audit`, and `git diff --check` before pushing.
+5. Run `npm run verify` and `git diff --check` before pushing.
 6. Run `npm run test:upstreams` when catalog data, source validation, or monitor behavior changes.
 7. Update `README.md`, `CHANGELOG.md`, public code comments, and templates affected by the change.
 8. Open a pull request with a clear description of the change.
@@ -76,7 +75,7 @@ changes.
 
 Use conventional-commit prefixes that match the actual diff scope:
 
-```
+```text
 feat: add a raster overlay source to the catalog
 fix: deduplicate overlapping source coverage ranges
 docs: update the public API section of the README

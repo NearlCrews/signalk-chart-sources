@@ -6,12 +6,14 @@ import { validateChartSource } from './validate.js'
 // metadata (parent, region, category, opacity) by id. The NASA GIBS ocean fields are date-dynamic
 // (a {date} path segment) and require a future catalog design with daily re-push; they stay direct.
 
-const NOAA_ENC_WMS = 'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer'
+const NOAA_ENC_WMS =
+  'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer'
 const EMODNET_WMS = 'https://ows.emodnet-bathymetry.eu/wms'
 const EMODNET_HA_WMS = 'https://ows.emodnet-humanactivities.eu/wms'
 const BLUETOPO_WMS = 'https://nowcoast.noaa.gov/geoserver/bluetopo/wms'
 const MARINE_REGIONS_WMS = 'https://geo.vliz.be/geoserver/MarineRegions/wms'
-const NOAA_MPA_SERVER = 'https://gis.charttools.noaa.gov/arcgis/rest/services/survey_priorities2_national/MPA_Inventory_Separates/MapServer'
+const NOAA_MPA_SERVER =
+  'https://gis.charttools.noaa.gov/arcgis/rest/services/survey_priorities2_national/MPA_Inventory_Separates/MapServer'
 
 const EMODNET_BOUNDS: Bbox = [-30.0, 25.0, 43.0, 84.0]
 // The BlueTopo geographic extent from the service GetCapabilities (bluetopo:bathymetry): US waters
@@ -35,7 +37,8 @@ const VLIZ_ATTR = 'Flanders Marine Institute (VLIZ), marineregions.org, CC-BY'
 // identical attribution fields on 2026-07-07 (mirrors Binnacle's own copy in
 // src/features/depth-charts/seascape-sources.ts; re-fetch and update both if Seascape's own
 // attribution text changes).
-const SEASCAPE_ATTR = '<a href="https://openwaters.io/charts/seascape#license">© Open Water Software, LLC</a>  | <a href="https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/ITCOGT">African Great Lakes Bathymetry (GLWNB-2020): Victoria, Albert, Edward, George</a> | <a href="https://www.ausseabed.gov.au/data/bathymetry">AusBathyTopo (Australia) 2024 250 m</a> | <a href="https://tanahair.indonesia.go.id/">BATNAS Batimetri Nasional (Indonesia, ~180 m)</a> | <a href="https://doi.org/10.1594/PANGAEA.855987">Bodensee (Lake Constance) bathymetry 3 m \u2014 IGKB Tiefenschärfe</a> | <a href="https://www.ncei.noaa.gov/products/coastal-relief-model">NOAA CUDEM 1/9 arc-second (NCEI Topobathy 2014)</a> | <a href="https://www.ncei.noaa.gov/products/coastal-relief-model">NOAA CUDEM 1/3 arc-second (NCEI Topobathy 2014)</a> | <a href="https://dataforsyningen.dk/data/4707">Danmarks Dybdemodel (DDM) 50 m</a> | <a href="https://emodnet.ec.europa.eu/en/bathymetry">EMODnet Bathymetry 2024 DTM</a> | <a href="https://www.ausseabed.gov.au/data/bathymetry">Great Barrier Reef Bathymetry 2020 30 m (gbr30)</a> | <a href="https://www.gebco.net/">GEBCO 2026 Grid (ice surface elevation)</a> | <a href="https://www.ncei.noaa.gov/products/great-lakes-bathymetry">NOAA NCEI Great Lakes Bathymetry (~90 m)</a> | <a href="https://open.canada.ca/data/en/dataset/335408ab-e7c9-581f-09fe-44487e1fd213">GSC Atlantic Bathymetric Compilation 100 m (Scotian Shelf + Newfoundland-Labrador)</a> | <a href="https://open.canada.ca/data/en/dataset/e6e11b99-f0cc-44f7-f5eb-3b995fb1637e">GSC Canada West Coast Topo-Bathymetric DEM 10 m (BC coast + Salish Sea)</a> | <a href="https://www.infomar.ie/">INFOMAR Bathymetry 10 m (merged inshore, Ireland)</a> | <a href="https://www.infomar.ie/">INFOMAR Bathymetry 25 m (merged shelf, Ireland)</a> | <a href="https://www.swisstopo.admin.ch/en/height-model-swissbathy3d">Lac Léman (Lake Geneva) Bathymetry \u2014 swissBATHY3D (~2 m)</a> | <a href="https://www.swisstopo.admin.ch/en/height-model-swissbathy3d">Lac de Neuchâtel Bathymetry \u2014 swissBATHY3D (~1 m)</a> | <a href="https://pubs.usgs.gov/dds/dds-55/pacmaps/lt_data.htm">Lake Tahoe Bathymetry (USGS DDS-55, 10 m)</a> | <a href="https://www.ncei.noaa.gov/products/estuarine-bathymetric-digital-elevation-models">NOAA NOS Estuarine Bathymetric DEMs (30 m)</a> | <a href="https://noaa-s102-pds.s3.amazonaws.com/README.html">NOAA S-102 Bathymetric Surface</a> | <a href="https://doi.org/10.1594/PANGAEA.880618">Southwest Indian Ocean Bathymetric Compilation (swIOBC) 250 m</a> | <a href="https://environment.data.gov.uk/dataset/77e6f743-d708-4909-a80f-9510b7dbaa16">SurfZone DEM 2019 (England intertidal/surf zone, 2 m)</a> | <a href="https://downloads.rijkswaterstaatdata.nl/">Vaklodingen 20 m (Dutch coastal waters, estuaries & main rivers)</a> | <a href="https://osmdata.openstreetmap.de/data/land-polygons.html">OpenStreetMap land polygons (ODbL)</a>'
+const SEASCAPE_ATTR =
+  '<a href="https://openwaters.io/charts/seascape#license">© Open Water Software, LLC</a>  | <a href="https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/ITCOGT">African Great Lakes Bathymetry (GLWNB-2020): Victoria, Albert, Edward, George</a> | <a href="https://www.ausseabed.gov.au/data/bathymetry">AusBathyTopo (Australia) 2024 250 m</a> | <a href="https://tanahair.indonesia.go.id/">BATNAS Batimetri Nasional (Indonesia, ~180 m)</a> | <a href="https://doi.org/10.1594/PANGAEA.855987">Bodensee (Lake Constance) bathymetry 3 m \u2014 IGKB Tiefenschärfe</a> | <a href="https://www.ncei.noaa.gov/products/coastal-relief-model">NOAA CUDEM 1/9 arc-second (NCEI Topobathy 2014)</a> | <a href="https://www.ncei.noaa.gov/products/coastal-relief-model">NOAA CUDEM 1/3 arc-second (NCEI Topobathy 2014)</a> | <a href="https://dataforsyningen.dk/data/4707">Danmarks Dybdemodel (DDM) 50 m</a> | <a href="https://emodnet.ec.europa.eu/en/bathymetry">EMODnet Bathymetry 2024 DTM</a> | <a href="https://www.ausseabed.gov.au/data/bathymetry">Great Barrier Reef Bathymetry 2020 30 m (gbr30)</a> | <a href="https://www.gebco.net/">GEBCO 2026 Grid (ice surface elevation)</a> | <a href="https://www.ncei.noaa.gov/products/great-lakes-bathymetry">NOAA NCEI Great Lakes Bathymetry (~90 m)</a> | <a href="https://open.canada.ca/data/en/dataset/335408ab-e7c9-581f-09fe-44487e1fd213">GSC Atlantic Bathymetric Compilation 100 m (Scotian Shelf + Newfoundland-Labrador)</a> | <a href="https://open.canada.ca/data/en/dataset/e6e11b99-f0cc-44f7-f5eb-3b995fb1637e">GSC Canada West Coast Topo-Bathymetric DEM 10 m (BC coast + Salish Sea)</a> | <a href="https://www.infomar.ie/">INFOMAR Bathymetry 10 m (merged inshore, Ireland)</a> | <a href="https://www.infomar.ie/">INFOMAR Bathymetry 25 m (merged shelf, Ireland)</a> | <a href="https://www.swisstopo.admin.ch/en/height-model-swissbathy3d">Lac Léman (Lake Geneva) Bathymetry \u2014 swissBATHY3D (~2 m)</a> | <a href="https://www.swisstopo.admin.ch/en/height-model-swissbathy3d">Lac de Neuchâtel Bathymetry \u2014 swissBATHY3D (~1 m)</a> | <a href="https://pubs.usgs.gov/dds/dds-55/pacmaps/lt_data.htm">Lake Tahoe Bathymetry (USGS DDS-55, 10 m)</a> | <a href="https://www.ncei.noaa.gov/products/estuarine-bathymetric-digital-elevation-models">NOAA NOS Estuarine Bathymetric DEMs (30 m)</a> | <a href="https://noaa-s102-pds.s3.amazonaws.com/README.html">NOAA S-102 Bathymetric Surface</a> | <a href="https://doi.org/10.1594/PANGAEA.880618">Southwest Indian Ocean Bathymetric Compilation (swIOBC) 250 m</a> | <a href="https://environment.data.gov.uk/dataset/77e6f743-d708-4909-a80f-9510b7dbaa16">SurfZone DEM 2019 (England intertidal/surf zone, 2 m)</a> | <a href="https://downloads.rijkswaterstaatdata.nl/">Vaklodingen 20 m (Dutch coastal waters, estuaries & main rivers)</a> | <a href="https://osmdata.openstreetmap.de/data/land-polygons.html">OpenStreetMap land polygons (ODbL)</a>'
 
 // Group descriptors shared by a source and its facet, named so the group id cannot diverge between
 // the two and break the webapp's group aggregation.
@@ -45,15 +48,23 @@ const NOAA_ENC_GROUP = { id: 'noaa-enc', title: 'NOAA ENC (US)' }
 const EMODNET_MPA_GROUP = { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
 
 /** Build a WMS GetMap ChartSource (256 px, EPSG:3857, image/png, transparent), matching the webapp wmsTiles. */
-function wms (
-  id: string, title: string, base: string, layers: string, styles: string,
-  extra: { minzoom?: number, maxzoom?: number, bounds?: Bbox, attribution: string, group?: ChartGroup }
+function wms(
+  id: string,
+  title: string,
+  base: string,
+  layers: string,
+  styles: string,
+  extra: { minzoom?: number; maxzoom?: number; bounds?: Bbox; attribution: string; group?: ChartGroup }
 ): ChartSource {
   return {
-    id, title, tileSize: 256,
-    minzoom: extra.minzoom ?? 0, maxzoom: extra.maxzoom ?? 18,
+    id,
+    title,
+    tileSize: 256,
+    minzoom: extra.minzoom ?? 0,
+    maxzoom: extra.maxzoom ?? 18,
     ...(extra.bounds ? { bounds: extra.bounds } : {}),
-    attribution: extra.attribution, fallbackTileBytes: 512_000,
+    attribution: extra.attribution,
+    fallbackTileBytes: 512_000,
     ...(extra.group ? { group: extra.group } : {}),
     upstream: { mode: 'wms', base, layers, styles, version: '1.3.0', format: 'image/png', transparent: true }
   }
@@ -61,47 +72,84 @@ function wms (
 
 const SOURCES: ChartSource[] = [
   wms('depth-gebco', 'GEBCO bathymetry', 'https://wms.gebco.net/mapserv', 'GEBCO_LATEST', '', {
-    maxzoom: 12, attribution: 'GEBCO_2024 Grid, GEBCO Compilation Group (2024)'
+    maxzoom: 12,
+    attribution: 'GEBCO_2024 Grid, GEBCO Compilation Group (2024)'
   }),
   wms('depth-emodnet', 'EMODnet bathymetry', EMODNET_WMS, 'emodnet:mean_multicolour', '', {
-    maxzoom: 12, bounds: EMODNET_BOUNDS, attribution: EMODNET_BATHY_ATTR, group: EMODNET_GROUP
+    maxzoom: 12,
+    bounds: EMODNET_BOUNDS,
+    attribution: EMODNET_BATHY_ATTR,
+    group: EMODNET_GROUP
   }),
   wms('depth-emodnet-quality', 'Quality index', EMODNET_WMS, 'emodnet:quality_index', 'quality_index_combined', {
-    maxzoom: 12, bounds: EMODNET_BOUNDS, attribution: EMODNET_BATHY_ATTR, group: EMODNET_GROUP
+    maxzoom: 12,
+    bounds: EMODNET_BOUNDS,
+    attribution: EMODNET_BATHY_ATTR,
+    group: EMODNET_GROUP
   }),
   {
     // tileSize 512 matches the upstream: the nowcoast GWC EPSG:3857 tile matrix set serves
     // 512 by 512 tiles per its WMTS GetCapabilities, and bluetopo:bathymetry publishes only
     // that matrix set.
-    id: 'depth-bluetopo', title: 'BlueTopo bathymetry', tileSize: 512,
-    minzoom: 0, maxzoom: 16, bounds: BLUETOPO_BOUNDS, fallbackTileBytes: 1_000_000,
+    id: 'depth-bluetopo',
+    title: 'BlueTopo bathymetry',
+    tileSize: 512,
+    minzoom: 0,
+    maxzoom: 16,
+    bounds: BLUETOPO_BOUNDS,
+    fallbackTileBytes: 1_000_000,
     attribution: BLUETOPO_ATTR,
     group: BLUETOPO_GROUP,
-    upstream: { mode: 'wmts', urlTemplate: 'https://nowcoast.noaa.gov/geoserver/gwc/service/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=bluetopo:bathymetry&STYLE=&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png8' }
+    upstream: {
+      mode: 'wmts',
+      urlTemplate:
+        'https://nowcoast.noaa.gov/geoserver/gwc/service/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=bluetopo:bathymetry&STYLE=&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png8'
+    }
   },
   wms('depth-bluetopo-uncertainty', 'Uncertainty', BLUETOPO_WMS, 'bathymetry', 'nbs_uncertainty', {
-    maxzoom: 16, bounds: BLUETOPO_BOUNDS, attribution: BLUETOPO_ATTR, group: BLUETOPO_GROUP
+    maxzoom: 16,
+    bounds: BLUETOPO_BOUNDS,
+    attribution: BLUETOPO_ATTR,
+    group: BLUETOPO_GROUP
   }),
   wms('depth-noaa-enc', 'NOAA ENC', NOAA_ENC_WMS, '0,1,2,3,4,5,6,7,10', '', {
-    bounds: NOAA_ENC_BOUNDS, attribution: NOAA_ENC_ATTR, group: NOAA_ENC_GROUP
+    bounds: NOAA_ENC_BOUNDS,
+    attribution: NOAA_ENC_ATTR,
+    group: NOAA_ENC_GROUP
   }),
   wms('depth-noaa-enc-quality', 'Data quality (ZOC)', NOAA_ENC_WMS, '8,9', '', {
-    bounds: NOAA_ENC_BOUNDS, attribution: NOAA_ENC_ATTR, group: NOAA_ENC_GROUP
+    bounds: NOAA_ENC_BOUNDS,
+    attribution: NOAA_ENC_ATTR,
+    group: NOAA_ENC_GROUP
   }),
   {
     // tileSize 512 matches how Seascape's own style.json declares this raster-dem source.
-    id: 'seascape-dem', title: 'Seascape depth shading', tileSize: 512,
-    minzoom: 0, maxzoom: 17, fallbackTileBytes: 1_000_000, attribution: SEASCAPE_ATTR,
+    id: 'seascape-dem',
+    title: 'Seascape depth shading',
+    tileSize: 512,
+    minzoom: 0,
+    maxzoom: 17,
+    fallbackTileBytes: 1_000_000,
+    attribution: SEASCAPE_ATTR,
     upstream: { mode: 'xyz', urlTemplate: 'https://tiles.openwaters.io/seascape/{z}/{x}/{y}.webp' }
   },
   {
-    id: 'seascape-vector', title: 'Seascape bathymetry vector', tileSize: 256,
-    minzoom: 0, maxzoom: 14, fallbackTileBytes: 750_000, attribution: SEASCAPE_ATTR,
+    id: 'seascape-vector',
+    title: 'Seascape bathymetry vector',
+    tileSize: 256,
+    minzoom: 0,
+    maxzoom: 14,
+    fallbackTileBytes: 750_000,
+    attribution: SEASCAPE_ATTR,
     upstream: { mode: 'xyz', urlTemplate: 'https://tiles.openwaters.io/seascape/{z}/{x}/{y}.pbf' }
   },
   {
-    id: 'seamark', title: 'OpenSeaMap seamarks', tileSize: 256,
-    minzoom: 0, maxzoom: 18, fallbackTileBytes: 256_000,
+    id: 'seamark',
+    title: 'OpenSeaMap seamarks',
+    tileSize: 256,
+    minzoom: 0,
+    maxzoom: 18,
+    fallbackTileBytes: 256_000,
     attribution: '© OpenSeaMap contributors, ODbL',
     upstream: { mode: 'xyz', urlTemplate: 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png' }
   },
@@ -112,26 +160,44 @@ const SOURCES: ChartSource[] = [
     attribution: VLIZ_ATTR
   }),
   wms('mpa-emodnet', 'Marine protected areas', EMODNET_HA_WMS, 'marineprotectedareas', '', {
-    bounds: EMODNET_BOUNDS, attribution: EMODNET_HA_ATTR, group: EMODNET_MPA_GROUP
+    bounds: EMODNET_BOUNDS,
+    attribution: EMODNET_HA_ATTR,
+    group: EMODNET_MPA_GROUP
   }),
   wms('mpa-natura2000', 'Natura 2000', EMODNET_HA_WMS, 'natura2000areas', '', {
-    bounds: EMODNET_BOUNDS, attribution: EMODNET_HA_ATTR, group: EMODNET_MPA_GROUP
+    bounds: EMODNET_BOUNDS,
+    attribution: EMODNET_HA_ATTR,
+    group: EMODNET_MPA_GROUP
   }),
   {
-    id: 'mpa-noaa', title: 'NOAA MPA inventory', tileSize: 256,
-    minzoom: 0, maxzoom: 18, bounds: NOAA_MPA_BOUNDS, fallbackTileBytes: 512_000,
+    id: 'mpa-noaa',
+    title: 'NOAA MPA inventory',
+    tileSize: 256,
+    minzoom: 0,
+    maxzoom: 18,
+    bounds: NOAA_MPA_BOUNDS,
+    fallbackTileBytes: 512_000,
     attribution: 'NOAA National Marine Protected Areas Center',
     upstream: { mode: 'arcgis', base: NOAA_MPA_SERVER }
   },
   {
-    id: 'basemap', title: 'OpenFreeMap Liberty', tileSize: 256,
-    minzoom: 0, maxzoom: 20, vectorMaxzoom: 14, fallbackTileBytes: 750_000,
+    id: 'basemap',
+    title: 'OpenFreeMap Liberty',
+    tileSize: 256,
+    minzoom: 0,
+    maxzoom: 20,
+    vectorMaxzoom: 14,
+    fallbackTileBytes: 750_000,
     attribution: '© OpenMapTiles, © OpenStreetMap contributors',
-    upstream: { mode: 'style', styleUrl: 'https://tiles.openfreemap.org/styles/liberty', allowedHosts: ['tiles.openfreemap.org'] }
+    upstream: {
+      mode: 'style',
+      styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+      allowedHosts: ['tiles.openfreemap.org']
+    }
   }
 ]
 
-function deepFreeze<T> (value: T): T {
+function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const nested of Object.values(value)) deepFreeze(nested)
     Object.freeze(value)
@@ -139,7 +205,7 @@ function deepFreeze<T> (value: T): T {
   return value
 }
 
-function defineCatalog (sources: ChartSource[]): readonly ChartSource[] {
+function defineCatalog(sources: ChartSource[]): readonly ChartSource[] {
   const ids = new Set<string>()
   for (const source of sources) {
     validateChartSource(source)
@@ -154,6 +220,6 @@ export const CHART_SOURCES: readonly ChartSource[] = defineCatalog(SOURCES)
 const BY_ID = new Map(CHART_SOURCES.map((s) => [s.id, s]))
 
 /** Look up a source by its stable id; undefined for an id not in the catalog. */
-export function chartSourceById (id: string): ChartSource | undefined {
+export function chartSourceById(id: string): ChartSource | undefined {
   return BY_ID.get(id)
 }

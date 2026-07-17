@@ -1,13 +1,37 @@
-import test from 'node:test'
 import assert from 'node:assert/strict'
+import test from 'node:test'
 import { expandUpstreamUrl, proxyTileTemplate } from '../src/expand.js'
 import { makeSource } from './fixtures.js'
 
 const xyz = makeSource({ id: 'x', title: 'X' })
-const wmts = makeSource({ id: 'w', title: 'W', tileSize: 512, maxzoom: 16, upstream: { mode: 'wmts', urlTemplate: 'https://h/wmts?TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}' } })
-const wms = makeSource({ id: 's', title: 'S', upstream: { mode: 'wms', base: 'https://w/wms', layers: '0,1', styles: 'q', version: '1.3.0', format: 'image/png', transparent: true } })
+const wmts = makeSource({
+  id: 'w',
+  title: 'W',
+  tileSize: 512,
+  maxzoom: 16,
+  upstream: { mode: 'wmts', urlTemplate: 'https://h/wmts?TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}' }
+})
+const wms = makeSource({
+  id: 's',
+  title: 'S',
+  upstream: {
+    mode: 'wms',
+    base: 'https://w/wms',
+    layers: '0,1',
+    styles: 'q',
+    version: '1.3.0',
+    format: 'image/png',
+    transparent: true
+  }
+})
 const arcgis = makeSource({ id: 'a', title: 'A', upstream: { mode: 'arcgis', base: 'https://m/MapServer' } })
-const style = makeSource({ id: 'b', title: 'B', maxzoom: 20, vectorMaxzoom: 14, upstream: { mode: 'style', styleUrl: 'https://tiles.example/styles/liberty', allowedHosts: ['tiles.example'] } })
+const style = makeSource({
+  id: 'b',
+  title: 'B',
+  maxzoom: 20,
+  vectorMaxzoom: 14,
+  upstream: { mode: 'style', styleUrl: 'https://tiles.example/styles/liberty', allowedHosts: ['tiles.example'] }
+})
 
 test('xyz substitutes z, x, and y', () => {
   assert.equal(expandUpstreamUrl(xyz, 3, 2, 1), 'https://h/3/2/1.png')
@@ -45,6 +69,15 @@ test('arcgis builds the export query with the tile bbox', () => {
   assert.equal(url.searchParams.get('size'), '256,256')
 })
 
+test('arcgis normalizes a trailing slash before appending export', () => {
+  const trailing = makeSource({
+    id: 'a',
+    upstream: { mode: 'arcgis', base: 'https://m/MapServer/' }
+  })
+  const url = new URL(expandUpstreamUrl(trailing, 1, 0, 0))
+  assert.equal(url.pathname, '/MapServer/export')
+})
+
 test('an out-of-range tile coordinate throws', () => {
   assert.throws(() => expandUpstreamUrl(xyz, 1, 2, 0), RangeError) // x 2 >= 2^1
   assert.throws(() => expandUpstreamUrl(wms, 30, 0, 0), RangeError) // z above maxzoom
@@ -54,8 +87,14 @@ test('an out-of-range tile coordinate throws', () => {
 })
 
 test('proxyTileTemplate builds the plugin-facing tile template', () => {
-  assert.equal(proxyTileTemplate('/plugins/signalk-chart-locker', 'depth-gebco'), '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}')
-  assert.equal(proxyTileTemplate('/plugins/signalk-chart-locker/', 'depth-gebco'), '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}')
+  assert.equal(
+    proxyTileTemplate('/plugins/signalk-chart-locker', 'depth-gebco'),
+    '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}'
+  )
+  assert.equal(
+    proxyTileTemplate('/plugins/signalk-chart-locker/', 'depth-gebco'),
+    '/plugins/signalk-chart-locker/tile/depth-gebco/{z}/{x}/{y}'
+  )
   assert.throws(() => proxyTileTemplate('', 'depth-gebco'), TypeError)
   assert.throws(() => proxyTileTemplate('/plugins/signalk-chart-locker', '../secret'), TypeError)
 })

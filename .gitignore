@@ -1,2 +1,8 @@
 node_modules/
 dist/
+coverage/
+package/
+.cache/
+.cave/
+.claude/
+.remember/

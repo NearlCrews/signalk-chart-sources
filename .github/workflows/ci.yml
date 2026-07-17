@@ -9,9 +9,17 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -19,14 +27,33 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
       - run: npm ci
+
+      - name: Repository quality checks
+        if: matrix.node-version == 24
+        run: npm run verify:commit
+
+      - name: Check committed whitespace
+        if: matrix.node-version == 24
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            git diff-tree --check --root "$HEAD_SHA"
+          else
+            git diff --check "$BASE_SHA...$HEAD_SHA"
+          fi
 
       - name: Build
         run: npm run build
@@ -43,3 +70,23 @@ jobs:
       - name: Verify the packed package
         if: matrix.node-version == 24
         run: npm run test:package
+
+      - name: Audit development dependencies
+        if: matrix.node-version == 24
+        run: npm audit
+
+      - name: Audit runtime dependencies
+        if: matrix.node-version == 24
+        run: npm run audit:runtime
+
+  ci-success:
+    name: CI success
+    if: ${{ always() }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every supported Node.js lane
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: test "$BUILD_RESULT" = success

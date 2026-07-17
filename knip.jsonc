@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "treatConfigHintsAsErrors": true,
+  "cycles": {
+    "dynamicImports": true
+  },
+  "rules": {
+    "cycles": "error"
+  }
+}

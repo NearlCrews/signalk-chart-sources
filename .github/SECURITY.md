@@ -4,10 +4,10 @@
 
 Security fixes target the latest published release:
 
-| Version              | Supported |
-| -------------------- | --------- |
-| Latest published release | Yes    |
-| Earlier releases         | No     |
+| Version                  | Supported |
+| ------------------------ | --------- |
+| Latest published release | Yes       |
+| Earlier releases         | No        |
 
 ## Reporting a Vulnerability
 

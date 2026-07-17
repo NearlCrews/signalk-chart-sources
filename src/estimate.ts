@@ -1,6 +1,6 @@
-import type { LngLatBbox, UpstreamTemplate, ZoomRange } from './types.js'
-import { chartSourceById } from './registry.js'
 import { tileCountInBbox } from './mercator.js'
+import { chartSourceById } from './registry.js'
+import type { LngLatBbox, UpstreamTemplate, ZoomRange } from './types.js'
 
 /** Conservative generic fallback when a source has no more specific first-download estimate. */
 export const DEFAULT_TILE_BYTES = 512_000
@@ -14,7 +14,7 @@ export const DEFAULT_TILE_BYTES_BY_MODE: Readonly<Record<UpstreamTemplate['mode'
   style: 750_000
 })
 
-function validatedAverage (id: string, value: number): number {
+function validatedAverage(id: string, value: number): number {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new RangeError(`average tile bytes for ${id} must be a positive safe integer`)
   }
@@ -30,7 +30,7 @@ function validatedAverage (id: string, value: number): number {
  * The consuming server must still enforce actual tile-count and transferred-byte limits because
  * compressed tile size varies and no average can be a mathematical upper bound.
  */
-export function estimateBytes (
+export function estimateBytes(
   sourceIds: readonly string[],
   bbox: LngLatBbox,
   zoomRange: ZoomRange,
@@ -42,9 +42,10 @@ export function estimateBytes (
     if (!source) throw new RangeError(`unknown chart source: ${id}`)
     const tiles = tileCountInBbox(source, bbox, zoomRange)
     const measured = perSourceAvgBytes[id]
-    const avg = measured === undefined
-      ? source.fallbackTileBytes ?? DEFAULT_TILE_BYTES_BY_MODE[source.upstream.mode] ?? DEFAULT_TILE_BYTES
-      : validatedAverage(id, measured)
+    const avg =
+      measured === undefined
+        ? (source.fallbackTileBytes ?? DEFAULT_TILE_BYTES_BY_MODE[source.upstream.mode] ?? DEFAULT_TILE_BYTES)
+        : validatedAverage(id, measured)
     const sourceTotal = tiles * avg
     if (!Number.isSafeInteger(sourceTotal) || !Number.isSafeInteger(total + sourceTotal)) {
       throw new RangeError('byte estimate exceeds the safe integer limit')

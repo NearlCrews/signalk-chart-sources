@@ -9,6 +9,37 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add a Binnacle-style repository toolchain with Biome, Markdown linting, spelling, Knip dead-code
+  and cycle checks, Publint, workflow invariant validation, aggregate verification scripts, and a
+  stable `CI success` status for repository rules.
+- Parse WMS and WMTS capabilities structurally, sample representative in-coverage tiles, and verify
+  the exact transitive style and TileJSON host graph in the scheduled upstream monitor. Bound live
+  response bodies and retry one transient fetch failure.
+- Add strict TypeScript compiler checks for unused code, implicit returns, fallthrough, overrides,
+  unreachable code, property access, labels, and path casing.
+
+### Changed
+
+- Accept `unknown` in `validateChartSource`, validate the complete runtime structure, and narrow
+  successful values to `ChartSource`.
+- Bound source strings and collections, reject credentials, fragments, unsupported template tokens,
+  WMS query injection, base URL queries, duplicate style hosts, and unknown upstream modes.
+- Normalize ArcGIS base trailing slashes in TypeScript and the Rust Chart Locker mirror.
+- Run package metadata and installed-consumer checks against the exact tarball retained for npm
+  publication, and include the changelog in the published package.
+- Publish only stable releases whose version tag commit is reachable from `main`, serialize duplicate
+  release runs, and request npm provenance for the verified tarball.
+- Update all workflows to the reviewed `actions/setup-node` v7 commit and allow Dependabot to report
+  major updates for compatibility review.
+
+### Fixed
+
+- Reject `[180, south, -180, north]` as a zero-longitude-span bbox in counting, array enumeration,
+  lazy iteration, source validation, and the Rust tile-cache mirror.
+- Document and test the existing inclusive tile-boundary behavior used for conservative warming.
+
 ## [0.3.1] - 2026-07-13
 
 ### Fixed

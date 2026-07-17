@@ -1,7 +1,7 @@
-import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CHART_SOURCES, chartSourceById } from '../src/registry.js'
+import test from 'node:test'
 import { expandUpstreamUrl } from '../src/expand.js'
+import { CHART_SOURCES, chartSourceById } from '../src/registry.js'
 import type { Bbox, ChartSource } from '../src/types.js'
 
 // A typo'd id must fail the test, not silently return undefined, so lookups assert.

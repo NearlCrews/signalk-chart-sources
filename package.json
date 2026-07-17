@@ -14,16 +14,32 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "CHANGELOG.md",
     "MIGRATING.md"
   ],
   "scripts": {
     "build": "tsc",
+    "lint": "npm run lint:code && npm run lint:docs && npm run spellcheck",
+    "lint:code": "biome lint .",
+    "lint:docs": "markdownlint-cli2 \"*.md\" \".github/**/*.md\"",
+    "spellcheck": "cspell --no-progress --show-suggestions \"*.md\" \".github/**/*.{md,yml,yaml}\"",
+    "ci:biome": "biome ci .",
+    "ci:workflows": "node scripts/check-workflows.mjs",
+    "deadcode": "knip",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
     "prepare": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "node --import tsx --test test/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=85 test/*.test.ts",
     "test:package": "npm run build && node scripts/package-smoke.mjs",
-    "test:upstreams": "node --import tsx scripts/check-upstreams.ts"
+    "test:upstreams": "node --import tsx scripts/check-upstreams.ts",
+    "package:lint": "publint --strict",
+    "package:check": "npm run package:lint && npm run test:package",
+    "audit:runtime": "npm audit --omit=dev",
+    "verify:commit": "npm run ci:biome && npm run ci:workflows && npm run lint && npm run deadcode",
+    "verify:fast": "npm run verify:commit && npm run typecheck",
+    "verify": "npm run verify:fast && npm test && npm run test:coverage && npm run build && npm run package:check && npm audit && npm run audit:runtime"
   },
   "keywords": [
     "signalk",
@@ -55,9 +71,16 @@
     "url": "https://github.com/NearlCrews/signalk-chart-sources/issues"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.4",
     "@types/node": "^26.1.1",
+    "cspell": "10.0.1",
+    "fast-xml-parser": "^5.10.1",
+    "knip": "6.27.0",
+    "markdownlint-cli2": "0.23.1",
+    "publint": "0.3.21",
     "tsx": "^4.23.1",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "yaml": "2.9.0"
   },
   "allowScripts": {
     "esbuild@0.28.1": true
