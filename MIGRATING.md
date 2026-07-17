@@ -3,6 +3,28 @@
 Version 0.3.0 is a breaking pre-1.0 release. Existing `^0.2.x` dependency ranges do not select it,
 so consumers can migrate and test deliberately.
 
+## Unreleased validation hardening
+
+The pending changes tighten the 0.3.x fail-closed contract. Consumers that construct source objects
+outside the built-in catalog should review these requirements before selecting the next release:
+
+- `validateChartSource` now accepts `unknown`, checks the complete runtime structure, and narrows a
+  successful value to `ChartSource`. Missing, sparse, incorrectly typed, and unknown mode values are
+  rejected before any nested field is used.
+- Source text, URLs, WMS values, coverage arrays, and style-host arrays have bounded sizes aligned
+  with the Chart Locker container boundary.
+- HTTPS URLs reject credentials and fragments. WMS and ArcGIS base URLs also reject query strings.
+  WMS version must be `1.3.0`, and layer, style, and format values reject `&`, `?`, and `#`.
+- XYZ and WMTS templates accept only `{z}`, `{x}`, and `{y}` placeholders. Style hosts must be valid,
+  unique case-insensitively, and include the style URL host.
+- `[180, south, -180, north]` is rejected as a zero-longitude-span bbox in both TypeScript and the
+  Rust tile-cache mirror.
+- Bbox tile edges remain inclusive for conservative warming. A region ending exactly on a tile
+  boundary can include the adjacent boundary tile.
+
+The Rust mirror in Chart Locker must be updated with the package so direct container configuration
+cannot accept a source that the TypeScript boundary rejects.
+
 ## All consumers
 
 1. Upgrade the runtime and development environment to Node.js 22 or newer.

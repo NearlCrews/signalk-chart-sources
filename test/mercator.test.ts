@@ -1,12 +1,12 @@
-import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { test } from 'node:test'
 import {
-  tileForLngLat,
-  webMercatorTileBounds,
-  tilesInBbox,
   iterateTilesInBbox,
+  MAX_MERCATOR_LAT,
   tileCountInBbox,
-  MAX_MERCATOR_LAT
+  tileForLngLat,
+  tilesInBbox,
+  webMercatorTileBounds
 } from '../src/mercator.js'
 import { CHART_SOURCES } from '../src/registry.js'
 import type { Bbox, ZoomRange } from '../src/types.js'
@@ -88,9 +88,7 @@ test('the bbox clips to the source bounds', () => {
   const bounded = makeSource({ bounds: [0, 0, 5, 5] })
   const unbounded = makeSource()
   const range: ZoomRange = [6, 6]
-  assert.ok(
-    tileCountInBbox(bounded, [-20, -20, 20, 20], range) < tileCountInBbox(unbounded, [-20, -20, 20, 20], range)
-  )
+  assert.ok(tileCountInBbox(bounded, [-20, -20, 20, 20], range) < tileCountInBbox(unbounded, [-20, -20, 20, 20], range))
 })
 
 test('an antimeridian-crossing box splits across the east and west edge without duplicates', () => {
@@ -109,6 +107,18 @@ test('a non-finite or degenerate box fails explicitly', () => {
   assert.throws(() => tileCountInBbox(makeSource(), [Number.NaN, 0, 1, 1], [2, 2]), RangeError)
   assert.throws(() => tileCountInBbox(makeSource(), [5, 5, 5, 5], [2, 2]), RangeError)
   assert.throws(() => tilesInBbox(makeSource(), [-181, 0, 1, 1], [2, 2]), RangeError)
+  assert.throws(() => tileCountInBbox(makeSource(), [180, -1, -180, 1], [2, 2]), /non-zero area/)
+  assert.throws(() => tilesInBbox(makeSource(), [180, -1, -180, 1], [2, 2]), /non-zero area/)
+  assert.throws(() => [...iterateTilesInBbox(makeSource(), [180, -1, -180, 1], [2, 2])], /non-zero area/)
+})
+
+test('bbox edges are inclusive for conservative warming at exact tile boundaries', () => {
+  assert.deepEqual(tilesInBbox(makeSource(), [-180, 0, 0, MAX_MERCATOR_LAT], [1, 1]), [
+    { z: 1, x: 0, y: 0 },
+    { z: 1, x: 0, y: 1 },
+    { z: 1, x: 1, y: 0 },
+    { z: 1, x: 1, y: 1 }
+  ])
 })
 
 test('tileCountInBbox clamps a vector source to vectorMaxzoom even when asked for a higher zoom', () => {
@@ -142,7 +152,10 @@ test('enumeration fails before allocating an unsafe array and supports lazy iter
 test('disjoint source coverage clips, merges, and deduplicates tile ranges', () => {
   const source = makeSource({
     bounds: [-180, -20, 180, 20],
-    coverage: [[170, -10, 180, 10], [-180, -10, -170, 10]]
+    coverage: [
+      [170, -10, 180, 10],
+      [-180, -10, -170, 10]
+    ]
   })
   assert.equal(tileCountInBbox(source, [160, -15, -160, 15], [0, 0]), 1)
   assert.deepEqual([...new Set(tilesInBbox(source, [160, -15, -160, 15], [2, 2]).map(({ x }) => x))], [0, 3])
@@ -157,11 +170,20 @@ test('deterministic bbox samples preserve count, uniqueness, and coordinate inva
   for (let sample = 0; sample < 100; sample++) {
     const west = -179 + random() * 340
     const south = -80 + random() * 140
-    const bbox: Bbox = [west, south, Math.min(179, west + 0.1 + random() * 10), Math.min(84, south + 0.1 + random() * 10)]
+    const bbox: Bbox = [
+      west,
+      south,
+      Math.min(179, west + 0.1 + random() * 10),
+      Math.min(84, south + 0.1 + random() * 10)
+    ]
     const z = Math.floor(random() * 9)
     const tiles = tilesInBbox(makeSource(), bbox, [z, z], { maxTiles: 20_000 })
     assert.equal(tiles.length, tileCountInBbox(makeSource(), bbox, [z, z]))
     assert.equal(new Set(tiles.map(({ z, x, y }) => `${z}/${x}/${y}`)).size, tiles.length)
-    assert.ok(tiles.every(({ x, y }) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < 2 ** z && y < 2 ** z))
+    assert.ok(
+      tiles.every(
+        ({ x, y }) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < 2 ** z && y < 2 ** z
+      )
+    )
   }
 })

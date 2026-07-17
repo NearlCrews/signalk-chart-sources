@@ -15,6 +15,7 @@
 
 ## Verification
 
+- [ ] `npm run verify:commit` passes
 - [ ] `npm test` passes
 - [ ] `npm run test:coverage` passes
 - [ ] `npm run typecheck` passes

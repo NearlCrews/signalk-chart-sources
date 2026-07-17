@@ -1,5 +1,5 @@
-import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { test } from 'node:test'
 import { estimateBytes } from '../src/estimate.js'
 import { chartSourceById } from '../src/registry.js'
 import type { Bbox } from '../src/types.js'

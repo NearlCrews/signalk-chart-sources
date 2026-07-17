@@ -24,23 +24,23 @@ export interface ChartGroup {
 
 /** Everything required to build or authorize an upstream request. */
 export type UpstreamTemplate =
-  | { readonly mode: 'xyz', readonly urlTemplate: string }
-  | { readonly mode: 'wmts', readonly urlTemplate: string }
+  | { readonly mode: 'xyz'; readonly urlTemplate: string }
+  | { readonly mode: 'wmts'; readonly urlTemplate: string }
   | {
-    readonly mode: 'wms'
-    readonly base: string
-    readonly layers: string
-    readonly styles: string
-    readonly version: '1.3.0'
-    readonly format: string
-    readonly transparent: boolean
-  }
-  | { readonly mode: 'arcgis', readonly base: string }
+      readonly mode: 'wms'
+      readonly base: string
+      readonly layers: string
+      readonly styles: string
+      readonly version: '1.3.0'
+      readonly format: string
+      readonly transparent: boolean
+    }
+  | { readonly mode: 'arcgis'; readonly base: string }
   | {
-    readonly mode: 'style'
-    readonly styleUrl: string
-    readonly allowedHosts: readonly string[]
-  }
+      readonly mode: 'style'
+      readonly styleUrl: string
+      readonly allowedHosts: readonly string[]
+    }
 
 /** A chart or raster overlay source shared by the renderer and tile cache. */
 export interface ChartSource {
