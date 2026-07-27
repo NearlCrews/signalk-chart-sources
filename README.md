@@ -59,7 +59,9 @@ Each `ChartSource` may contain:
 
 - `bounds`: one geographic display envelope, omitted for worldwide sources.
 - `coverage`: optional disjoint warming and estimate regions. When present, tile helpers use it
-  instead of `bounds`.
+  instead of `bounds`. The NOAA ENC sources carry coverage regions derived from the NOAA ENC product
+  catalog, so their counts and estimates track actual chart coverage instead of the global service
+  envelope.
 - `fallbackTileBytes`: a conservative first-download estimate used until a measured average exists.
 - `vectorMaxzoom`: the native vector-data maximum, below the visual overzoom ceiling when needed.
 
@@ -103,19 +105,22 @@ both sides of that boundary.
 - `expandUpstreamUrl(source, z, x, y)`: validate the source and coordinate, substitute XYZ or WMTS
   tokens, construct WMS or ArcGIS parameters, or return a style URL.
 - `proxyTileTemplate(pluginBase, sourceId)`: normalize a trailing slash on the plugin base, validate
-  the path-safe source id, and return the Chart Locker tile template.
+  the base and the path-safe source id, and return the Chart Locker tile template.
 
 `expandUpstreamUrl` only constructs a string. The consuming application performs the network request.
-Source validation requires bounded HTTPS URLs without credentials or fragments. XYZ and WMTS
-templates may contain only `{z}`, `{x}`, and `{y}` tokens. WMS and ArcGIS base URLs may not contain
-query parameters, WMS version must be `1.3.0`, and WMS layer, style, and format values may not inject
-query delimiters. Style hosts are validated, deduplicated case-insensitively, and must authorize the
-style URL itself.
+Source validation requires bounded HTTPS URLs without credentials or fragments, including a bare
+trailing `#`. XYZ and WMTS templates may contain only `{z}`, `{x}`, and `{y}` tokens, each exactly
+once, and the host may not contain tokens. WMS and ArcGIS base URLs may not contain query parameters
+or a bare trailing `?`, WMS version must be `1.3.0`, and WMS layer, style, and format values may not
+inject query delimiters or `+`. Optional text fields accept the empty string but reject non-empty
+whitespace-only values. Style hosts are validated without ports, deduplicated case-insensitively, and
+must authorize the style URL itself.
 
 ### Download planning
 
 - `estimateBytes(sourceIds, bbox, zoomRange, perSourceAvgBytes)`: multiply distinct tile counts by a
-  positive measured average or a conservative first-download fallback.
+  positive measured average or a conservative first-download fallback. Duplicate source ids are
+  counted once.
 - `DEFAULT_TILE_BYTES`: generic fallback, currently 512,000 bytes.
 - `DEFAULT_TILE_BYTES_BY_MODE`: fallbacks for XYZ, WMTS, WMS, ArcGIS, and style modes.
 
@@ -177,23 +182,22 @@ metadata. It parses configured WMS layers, styles, formats, CRS support, WMTS ma
 the complete transitive style and TileJSON host graph. Verify the upstream service before changing
 catalog data.
 
-## Migrating to 0.3.0
+## Migrating to 0.5.0
 
-The unreleased changes include intentional compatibility changes:
+Version 0.5.0 includes intentional compatibility changes:
 
-- The Node.js floor moves from 20 to 22.
-- Catalog entries, nested upstream objects, arrays, and shared tuple types become readonly.
-- Invalid coordinates, zooms, boxes, source definitions, estimate statistics, and unknown estimate
-  source ids throw instead of being clamped, ignored, or converted to empty results.
-- `tilesInBbox` rejects enumeration above its default limit. Use `tileCountInBbox`, pass an explicit
-  reviewed `maxTiles`, or use `iterateTilesInBbox` for bounded streaming.
-- Antimeridian-crossing boxes now split, merge, and deduplicate correctly.
-- NOAA ENC display bounds now follow the service-level WMS capabilities envelope.
-- First-download fallbacks are conservative and source-aware rather than a single 25,000-byte value.
+- The NOAA ENC sources carry catalog-derived `coverage` regions, so their tile counts and download
+  estimates are far smaller and track actual chart coverage instead of the global service envelope.
+- `estimateBytes` counts a duplicated source id once.
+- Source validation additionally rejects bare trailing `?` and `#` markers, template tokens in XYZ
+  and WMTS hosts, duplicate `{z}`, `{x}`, and `{y}` tokens, `+` in WMS layer, style, and format
+  values, ports in style allowed hosts, and non-empty whitespace-only optional text.
+- `proxyTileTemplate` validates plugin bases against whitespace, control characters, `?`, `#`, and
+  braces.
 
 Consumers should type-check against the release before upgrading and review every call that accepts
 untrusted geometry, statistics, or source ids. See [MIGRATING.md](MIGRATING.md) for an upgrade
-checklist and the known Binnacle and Chart Locker changes.
+checklist and the earlier 0.4.0 and 0.3.x migrations.
 
 ## Development
 

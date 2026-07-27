@@ -37,9 +37,9 @@ corresponding npm automation token, and confirm the workflow still publishes wit
 ## Prepare a release
 
 1. Confirm the working tree contains only intended changes.
-2. Choose the version according to the actual compatibility impact. The current Unreleased section
-   contains breaking runtime and type-contract changes, so it requires a new minor version while the
-   package remains below 1.0.0.
+2. Choose the version according to the actual compatibility impact of the Unreleased section.
+   Breaking runtime or type-contract changes require a new minor version while the package remains
+   below 1.0.0.
 3. Replace the Unreleased changelog content with a dated release section, then add a fresh Unreleased
    heading and update comparison links.
 4. Update `package.json` and `package-lock.json` without creating a tag:
@@ -76,6 +76,8 @@ corresponding npm automation token, and confirm the workflow still publishes wit
 5. Inspect the pending deployment, then approve the protected `npm` environment. This is the final
    approval before npm publication.
 6. The publish job downloads the verified tarball and publishes it through npm OIDC with provenance.
+   The workflow installs a pinned npm version with trusted-publishing support before publishing;
+   update that pin deliberately when npm ships relevant fixes.
 
 ## Verify publication
 
