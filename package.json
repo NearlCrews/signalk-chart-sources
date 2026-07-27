@@ -71,15 +71,15 @@
     "url": "https://github.com/NearlCrews/signalk-chart-sources/issues"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.4",
-    "@types/node": "^26.1.1",
+    "@biomejs/biome": "2.5.5",
+    "@types/node": "26.1.1",
     "cspell": "10.0.1",
-    "fast-xml-parser": "^5.10.1",
-    "knip": "6.27.0",
-    "markdownlint-cli2": "0.23.1",
-    "publint": "0.3.21",
-    "tsx": "^4.23.1",
-    "typescript": "^7.0.2",
+    "fast-xml-parser": "5.10.1",
+    "knip": "6.29.0",
+    "markdownlint-cli2": "0.23.2",
+    "publint": "0.3.22",
+    "tsx": "4.23.1",
+    "typescript": "7.0.2",
     "yaml": "2.9.0"
   },
   "allowScripts": {
