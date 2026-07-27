@@ -28,6 +28,20 @@ test('validateChartSource rejects invalid ids, zooms, coverage, estimates, and t
       ),
     /missing \{y\}/
   )
+  assert.throws(
+    () =>
+      validateChartSource(
+        makeSource({
+          upstream: { mode: 'xyz', urlTemplate: 'https://h/{z}/{x}/{y}/{z}.png' }
+        })
+      ),
+    /must contain \{z\} exactly once/
+  )
+})
+
+test('validateChartSource accepts empty optional text but rejects whitespace-only text', () => {
+  assert.doesNotThrow(() => validateChartSource(makeSource({ attribution: '' })))
+  assert.throws(() => validateChartSource(makeSource({ attribution: '   ' })), /non-whitespace text/)
 })
 
 test('validateChartSource rejects malformed runtime shapes and unknown modes', () => {
@@ -92,6 +106,48 @@ test('validateChartSource checks URL safety and every WMS runtime field', () => 
   assert.throws(
     () => validateChartSource({ ...makeSource(), upstream: { ...wms, transparent: 'yes' } }),
     /must be boolean/
+  )
+})
+
+test('validateChartSource rejects bare query and fragment markers, host tokens, ports, and plus signs', () => {
+  const wms = {
+    mode: 'wms',
+    base: 'https://h/wms',
+    layers: 'layer',
+    styles: '',
+    version: '1.3.0',
+    format: 'image/png',
+    transparent: true
+  } as const
+  assert.throws(
+    () => validateChartSource({ ...makeSource(), upstream: { ...wms, base: 'https://h/wms?' } }),
+    /query parameters/
+  )
+  assert.throws(
+    () => validateChartSource({ ...makeSource(), upstream: { ...wms, base: 'https://h/wms#' } }),
+    /fragment/
+  )
+  assert.throws(() => validateChartSource({ ...makeSource(), upstream: { ...wms, layers: 'a+b' } }), /must not contain/)
+  assert.throws(
+    () => validateChartSource(makeSource({ upstream: { mode: 'xyz', urlTemplate: 'https://{x}.h/{z}/{x}/{y}.png' } })),
+    /template tokens in the host/
+  )
+  assert.throws(
+    () => validateChartSource(makeSource({ upstream: { mode: 'xyz', urlTemplate: 'http://h/{z}/{x}/{y}.png' } })),
+    /must use https/
+  )
+  assert.throws(
+    () =>
+      validateChartSource(
+        makeSource({
+          upstream: {
+            mode: 'style',
+            styleUrl: 'https://tiles.example/style.json',
+            allowedHosts: ['tiles.example:443']
+          }
+        })
+      ),
+    /not a valid host/
   )
 })
 

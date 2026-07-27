@@ -4,7 +4,7 @@ import type { ChartSource, LngLatBbox, ZoomRange } from './types.js'
 export const MAX_TILE_ZOOM = 30
 
 const SOURCE_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/
-const INVALID_QUERY_VALUE_CHARACTER = /[&?#]/
+const INVALID_QUERY_VALUE_CHARACTER = /[&?#+]/
 const UTF8 = new TextEncoder()
 
 const MAX_SOURCE_ID_BYTES = 256
@@ -37,7 +37,7 @@ function containsInvalidTextControl(value: string): boolean {
   })
 }
 
-function containsInvalidUrlCharacter(value: string): boolean {
+export function containsInvalidUrlCharacter(value: string): boolean {
   return [...value].some((character) => {
     const code = character.charCodeAt(0)
     return /\s/u.test(character) || code <= 31 || code === 127
@@ -51,12 +51,16 @@ function assertBoundedText(
   allowEmpty = false
 ): asserts value is string {
   if (typeof value !== 'string') throw new TypeError(`${label} must be a string`)
-  if ((!allowEmpty && value.trim() === '') || utf8Length(value) > maxBytes || containsInvalidTextControl(value)) {
-    throw new TypeError(`${label} must be ${allowEmpty ? 'at most' : 'between 1 and'} ${maxBytes} UTF-8 bytes`)
+  // An optional field accepts the empty string but never non-empty whitespace-only text.
+  const blank = value.trim() === '' && (!allowEmpty || value !== '')
+  if (blank || utf8Length(value) > maxBytes || containsInvalidTextControl(value)) {
+    throw new TypeError(
+      `${label} must be ${allowEmpty ? 'empty or at most' : 'between 1 and'} ${maxBytes} UTF-8 bytes of non-whitespace text without control characters`
+    )
   }
 }
 
-function assertSourceId(value: unknown, label = 'source id'): asserts value is string {
+export function assertSourceId(value: unknown, label = 'source id'): asserts value is string {
   if (typeof value !== 'string' || utf8Length(value) > MAX_SOURCE_ID_BYTES || !SOURCE_ID.test(value)) {
     throw new TypeError(`invalid ${label}: ${String(value)}`)
   }
@@ -126,19 +130,31 @@ function parseHttpsUrl(value: unknown, label: string): URL {
   if (url.protocol !== 'https:') throw new TypeError(`${label} must use https`)
   if (url.hostname === '') throw new TypeError(`${label} must include a host`)
   if (url.username !== '' || url.password !== '') throw new TypeError(`${label} must not include credentials`)
-  if (url.hash !== '') throw new TypeError(`${label} must not include a fragment`)
+  // A bare trailing "#" parses to an empty hash, so check the raw text as well.
+  if (url.hash !== '' || value.includes('#')) throw new TypeError(`${label} must not include a fragment`)
   return url
 }
 
 function assertCleanBaseUrl(value: unknown, label: string): void {
   const url = parseHttpsUrl(value, label)
-  if (url.search !== '') throw new TypeError(`${label} must not include query parameters`)
+  // A bare trailing "?" parses to an empty search, so check the raw text as well.
+  if (url.search !== '' || (typeof value === 'string' && value.includes('?'))) {
+    throw new TypeError(`${label} must not include query parameters`)
+  }
 }
 
 function assertTemplate(value: unknown, label: string): void {
   assertBoundedText(value, label, MAX_URL_BYTES)
+  if (!value.startsWith('https://')) throw new TypeError(`${label} must use https`)
+  // Check the host before the token rules so a host token gets the more specific error.
+  const authority = value.slice('https://'.length).split(/[/?#]/, 1)[0] ?? ''
+  if (authority.includes('{')) throw new TypeError(`${label} must not use template tokens in the host`)
   for (const token of ['{z}', '{x}', '{y}']) {
     if (!value.includes(token)) throw new TypeError(`${label} is missing ${token}`)
+    // A repeated token still expands to a valid URL, so it would silently mask a typo.
+    if (value.indexOf(token) !== value.lastIndexOf(token)) {
+      throw new TypeError(`${label} must contain ${token} exactly once`)
+    }
   }
   const expanded = value.replaceAll('{z}', '0').replaceAll('{x}', '0').replaceAll('{y}', '0')
   if (/\{[^}]+\}/.test(expanded)) throw new TypeError(`${label} contains an unsupported template token`)
@@ -148,13 +164,13 @@ function assertTemplate(value: unknown, label: string): void {
 function assertQueryValue(value: unknown, label: string, maxBytes: number, allowEmpty = false): void {
   assertBoundedText(value, label, maxBytes, allowEmpty)
   if (containsInvalidUrlCharacter(value) || INVALID_QUERY_VALUE_CHARACTER.test(value)) {
-    throw new TypeError(`${label} must not contain whitespace, controls, &, ?, or #`)
+    throw new TypeError(`${label} must not contain whitespace, controls, &, ?, #, or +`)
   }
 }
 
 function normalizedHost(value: unknown, label: string): string {
   assertBoundedText(value, label, MAX_HOST_BYTES)
-  if (containsInvalidUrlCharacter(value) || /[/@?#]/.test(value)) throw new TypeError(`${label} is not a valid host`)
+  if (containsInvalidUrlCharacter(value) || /[/@:?#]/.test(value)) throw new TypeError(`${label} is not a valid host`)
   let url: URL
   try {
     url = new URL(`https://${value}`)

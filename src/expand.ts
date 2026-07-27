@@ -1,6 +1,6 @@
 import { webMercatorTileBounds } from './mercator.js'
 import type { ChartSource } from './types.js'
-import { assertTileCoordinate, validateChartSource } from './validate.js'
+import { assertSourceId, assertTileCoordinate, containsInvalidUrlCharacter, validateChartSource } from './validate.js'
 
 /** Reject a z/x/y outside the tile pyramid (defense in depth; the container validates first). */
 function assertInRange(source: ChartSource, z: number, x: number, y: number): void {
@@ -62,9 +62,8 @@ export function expandUpstreamUrl(source: ChartSource, z: number, x: number, y: 
     case 'style':
       return u.styleUrl
     default: {
-      // Every union member is handled above, so this is unreachable at compile time (the never
-      // assignment proves exhaustiveness). It fires only on a bad or stale mode from deserialized
-      // config, which the "defense in depth" contract says to reject rather than return undefined.
+      // validateChartSource already rejects unknown modes, so this backstop is unreachable; the
+      // never assignment proves exhaustiveness at compile time.
       const exhaustive: never = u
       throw new RangeError(`unknown upstream mode: ${String((exhaustive as { mode?: unknown }).mode)}`)
     }
@@ -74,13 +73,15 @@ export function expandUpstreamUrl(source: ChartSource, z: number, x: number, y: 
 /**
  * Return the plugin-facing tile template after removing trailing slashes from the base.
  *
- * @throws {TypeError} When the normalized base is empty or the source id is not path-safe.
+ * @throws {TypeError} When the normalized base is empty or unsafe, or the source id is not
+ * path-safe.
  */
 export function proxyTileTemplate(pluginBase: string, sourceId: string): string {
   const base = withoutTrailingSlashes(pluginBase)
   if (base === '') throw new TypeError('pluginBase must not be empty')
-  if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(sourceId)) {
-    throw new TypeError(`invalid source id: ${sourceId}`)
+  if (containsInvalidUrlCharacter(base) || /[?#{}]/.test(base)) {
+    throw new TypeError('pluginBase must not contain whitespace, controls, ?, #, or braces')
   }
+  assertSourceId(sourceId)
   return `${base}/tile/${sourceId}/{z}/{x}/{y}`
 }
