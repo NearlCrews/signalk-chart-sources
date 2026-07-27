@@ -11,13 +11,19 @@ test('estimateBytes sums tileCount times the per-source average', () => {
   assert.equal(withAvg % 100, 0)
 })
 
-test('estimateBytes falls back to DEFAULT_TILE_BYTES for an uncached source', () => {
+test('estimateBytes falls back to the source fallbackTileBytes for an uncached source', () => {
   const bbox: Bbox = [-1, -1, 1, 1]
   const withDefault = estimateBytes(['seamark'], bbox, [6, 6], {})
   assert.ok(withDefault > 0)
   const fallback = chartSourceById('seamark')?.fallbackTileBytes
   assert.ok(fallback)
   assert.equal(withDefault % fallback, 0)
+})
+
+test('estimateBytes counts a duplicated source id once', () => {
+  const bbox: Bbox = [-1, -1, 1, 1]
+  const once = estimateBytes(['seamark'], bbox, [6, 6], {})
+  assert.equal(estimateBytes(['seamark', 'seamark'], bbox, [6, 6], {}), once)
 })
 
 test('estimateBytes fails closed for unknown source ids', () => {

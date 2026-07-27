@@ -22,7 +22,8 @@ function validatedAverage(id: string, value: number): number {
 }
 
 /**
- * Return a conservative planning estimate for known sources and an inclusive zoom range.
+ * Return a conservative planning estimate for known sources and an inclusive zoom range. Duplicate
+ * source ids are counted once.
  *
  * @throws {RangeError} When a source id is unknown, an average is not a positive safe integer, tile
  * inputs are invalid, or the result exceeds Number.MAX_SAFE_INTEGER.
@@ -37,7 +38,7 @@ export function estimateBytes(
   perSourceAvgBytes: Readonly<Record<string, number>>
 ): number {
   let total = 0
-  for (const id of sourceIds) {
+  for (const id of new Set(sourceIds)) {
     const source = chartSourceById(id)
     if (!source) throw new RangeError(`unknown chart source: ${id}`)
     const tiles = tileCountInBbox(source, bbox, zoomRange)

@@ -97,4 +97,7 @@ test('proxyTileTemplate builds the plugin-facing tile template', () => {
   )
   assert.throws(() => proxyTileTemplate('', 'depth-gebco'), TypeError)
   assert.throws(() => proxyTileTemplate('/plugins/signalk-chart-locker', '../secret'), TypeError)
+  assert.throws(() => proxyTileTemplate('/plugins/chart locker', 'depth-gebco'), /whitespace/)
+  assert.throws(() => proxyTileTemplate('/plugins/x?a=1', 'depth-gebco'), TypeError)
+  assert.throws(() => proxyTileTemplate('/plugins/{z}', 'depth-gebco'), TypeError)
 })
