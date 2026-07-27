@@ -12,7 +12,17 @@ const XML = new XMLParser({
   attributeNamePrefix: '@_',
   removeNSPrefix: true,
   parseTagValue: false,
-  trimValues: true
+  trimValues: true,
+  // Capability documents are untrusted input: cap DOCTYPE entity definitions and expansions so a
+  // hostile response cannot amplify past the bounded body size.
+  processEntities: {
+    enabled: true,
+    maxEntityCount: 8,
+    maxEntitySize: 256,
+    maxTotalExpansions: 100_000,
+    maxExpandedLength: MAX_RESPONSE_BYTES
+  },
+  maxNestedTags: 64
 })
 
 type RecordValue = Record<string, unknown>

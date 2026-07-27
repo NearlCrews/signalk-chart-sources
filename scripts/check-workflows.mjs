@@ -11,7 +11,8 @@ const expectedActions = new Map([
   ['actions/checkout', '9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0'],
   ['actions/setup-node', '820762786026740c76f36085b0efc47a31fe5020'],
   ['actions/upload-artifact', '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'],
-  ['actions/download-artifact', '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c']
+  ['actions/download-artifact', '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c'],
+  ['actions/github-script', 'ed597411d8f924073f98dfc5c65a23a2325f34cd']
 ])
 
 function object(value, label) {
@@ -25,7 +26,7 @@ for (const path of workflows) {
   const permissions = object(workflow.permissions, `${path} permissions`)
   assert.deepEqual(permissions, { contents: 'read' }, `${path} must default to read-only contents`)
 
-  for (const match of source.matchAll(/^\s*- uses:\s+([^\s#]+)(?:\s+#.*)?$/gmu)) {
+  for (const match of source.matchAll(/^\s*(?:-\s+)?uses:\s+([^\s#]+)(?:\s+#.*)?$/gmu)) {
     const reference = match[1]
     assert.ok(reference, `${path} contains an empty action reference`)
     if (reference.startsWith('./')) continue
