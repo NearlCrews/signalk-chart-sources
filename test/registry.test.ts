@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { expandUpstreamUrl } from '../src/expand.js'
+import { tileCountInBbox } from '../src/mercator.js'
 import { CHART_SOURCES, chartSourceById } from '../src/registry.js'
 import type { Bbox, ChartSource } from '../src/types.js'
 
@@ -10,6 +11,9 @@ const src = (id: string): ChartSource => {
   assert.ok(s, `${id} must be in the catalog`)
   return s
 }
+
+const inBox = (b: Bbox | undefined, lng: number, lat: number): boolean =>
+  b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
 
 test('every source id is unique', () => {
   const ids = CHART_SOURCES.map((s) => s.id)
@@ -72,8 +76,6 @@ test('chartSourceById returns the catalog entry or undefined', () => {
 })
 
 test('chart bounds preserve service coverage envelopes', () => {
-  const inBox = (b: Bbox | undefined, lng: number, lat: number): boolean =>
-    b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
   // NOAA ENC reports a global service envelope because it includes remote US chart coverage.
   assert.equal(inBox(src('depth-noaa-enc').bounds, 144.8, 13.5), true)
   assert.equal(inBox(src('depth-noaa-enc').bounds, -71.3, 41.5), true)
@@ -136,4 +138,38 @@ test('BlueTopo bounds pin the US extent from the service capabilities (drift gua
   // South is a positive latitude and east is a negative longitude; a regression to the earlier
   // South Atlantic and European box fails here.
   assert.deepEqual(bluetopo.bounds, [-138.0, 16.786, -64.198, 59.55])
+})
+
+test('NOAA ENC coverage pins the chart regions from the ENC product catalog (drift guard)', () => {
+  const enc = src('depth-noaa-enc')
+  const quality = src('depth-noaa-enc-quality')
+  assert.ok(enc.coverage, 'depth-noaa-enc must carry coverage')
+  assert.equal(enc.coverage.length, 14)
+  assert.deepEqual(quality.coverage, enc.coverage)
+  // The first region is the densest one, so the upstream monitor samples a representative US tile.
+  assert.deepEqual(enc.coverage[0], [-100.8, 15.6, -64.3, 52.8])
+  const covered = (lng: number, lat: number): boolean => (enc.coverage ?? []).some((b) => inBox(b, lng, lat))
+  assert.equal(covered(-76.2, 37.5), true, 'Chesapeake Bay must be covered')
+  assert.equal(covered(144.8, 13.5), true, 'Guam must be covered')
+  assert.equal(covered(-157.9, 21.3), true, 'Honolulu must be covered')
+  assert.equal(covered(-146, 61), true, 'Prince William Sound must be covered')
+  assert.equal(covered(0, 50), false, 'the English Channel must not be covered')
+  assert.equal(covered(-15, -30), false, 'the South Atlantic must not be covered')
+})
+
+test('NOAA ENC counts and estimates track chart coverage, not the global envelope', () => {
+  const enc = src('depth-noaa-enc')
+  assert.equal(tileCountInBbox(enc, [-5, 48, 5, 52], [0, 10]), 0)
+  assert.ok(tileCountInBbox(enc, [-77, 36, -75, 38], [8, 8]) > 0)
+})
+
+test('every catalog source carries a positive safe-integer fallbackTileBytes', () => {
+  // Locks the estimateBytes invariant that the mode and default fallbacks stay unreachable for
+  // catalog sources; a new source without fallbackTileBytes would silently shift onto them.
+  for (const s of CHART_SOURCES) {
+    assert.ok(
+      s.fallbackTileBytes !== undefined && Number.isSafeInteger(s.fallbackTileBytes) && s.fallbackTileBytes > 0,
+      `${s.id} must carry a positive safe-integer fallbackTileBytes`
+    )
+  }
 })

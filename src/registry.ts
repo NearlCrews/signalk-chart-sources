@@ -24,6 +24,37 @@ const BLUETOPO_BOUNDS: Bbox = [-138.0, 16.786, -64.198, 59.55]
 // The service-level geographic envelope reported by the current WMS 1.3.0 GetCapabilities. The
 // actual ENC coverage is sparse inside this box, so consumers should still expect transparent tiles.
 const NOAA_ENC_BOUNDS: Bbox = [-180, -78.333333, 180, 81.6]
+// Disjoint warming and estimate regions, derived 2026-07-27 from the NOAA ENC product catalog
+// (https://www.charts.noaa.gov/ENCs/ENCProdCat.xml, issued 2026-07-25): the union of every active
+// cell footprint, clustered by region and rounded outward to 0.1 degree. The catalog extremes match
+// the service envelope above (Chukchi Plateau 81.6 north, Vahsel Bay -78.33 south), so re-derive
+// these boxes whenever the upstream monitor reports that envelope drifted. Harbor-scale detail is
+// sparse inside the larger boxes; only areas with no ENC cell at all are excluded.
+const NOAA_ENC_COVERAGE: readonly Bbox[] = [
+  // US East Coast, Gulf coast, Great Lakes, Puerto Rico, and the US Virgin Islands.
+  [-100.8, 15.6, -64.3, 52.8],
+  // US West Coast, Alaska, the eastern Aleutians, the Bering Sea, and the Arctic.
+  [-180, 30.5, -113.7, 81.6],
+  // Aleutian Islands and Gulf of Anadyr west of the antimeridian.
+  [165.6, 48, 180, 68],
+  // Hawaiian Islands out to Kure Atoll, with the surrounding band-1 ocean charts.
+  [-179.3, 5, -154, 30],
+  [-178.8, 15.6, -153.6, 28.8],
+  [-166.4, 18, -150, 30],
+  // San Diego to the Aleutians and Hawaii (US1WC07) and the eastern North Pacific (US1PO02).
+  [-180, 18.7, -116.3, 38.4],
+  [-154, 15, -116.5, 18.8],
+  // South Pacific: Cook, Samoa, Phoenix, and Line Islands (US1EEZ2), plus American Samoa and Swains.
+  [-180, -7.5, -154.3, 18.8],
+  [-173.8, -17.6, -165.2, -10],
+  // Guam, the Northern Mariana Islands, Palau, Micronesia, the Marshall Islands, and Wake Island.
+  [131, 0, 173.6, 26],
+  // Panama Canal approaches.
+  [-80.1, 8.7, -78, 9.9],
+  // Antarctica: Arthur Harbor, and the Weddell Sea coast.
+  [-64.5, -64.9, -63.9, -64.6],
+  [-40, -78.4, -30, -75]
+]
 const NOAA_MPA_BOUNDS: Bbox = [-180, 15, -60, 75]
 
 // Attribution strings shared by more than one source, named so a correction cannot land on one copy
@@ -54,7 +85,14 @@ function wms(
   base: string,
   layers: string,
   styles: string,
-  extra: { minzoom?: number; maxzoom?: number; bounds?: Bbox; attribution: string; group?: ChartGroup }
+  extra: {
+    minzoom?: number
+    maxzoom?: number
+    bounds?: Bbox
+    coverage?: readonly Bbox[]
+    attribution: string
+    group?: ChartGroup
+  }
 ): ChartSource {
   return {
     id,
@@ -63,6 +101,7 @@ function wms(
     minzoom: extra.minzoom ?? 0,
     maxzoom: extra.maxzoom ?? 18,
     ...(extra.bounds ? { bounds: extra.bounds } : {}),
+    ...(extra.coverage ? { coverage: extra.coverage } : {}),
     attribution: extra.attribution,
     fallbackTileBytes: 512_000,
     ...(extra.group ? { group: extra.group } : {}),
@@ -114,11 +153,13 @@ const SOURCES: ChartSource[] = [
   }),
   wms('depth-noaa-enc', 'NOAA ENC', NOAA_ENC_WMS, '0,1,2,3,4,5,6,7,10', '', {
     bounds: NOAA_ENC_BOUNDS,
+    coverage: NOAA_ENC_COVERAGE,
     attribution: NOAA_ENC_ATTR,
     group: NOAA_ENC_GROUP
   }),
   wms('depth-noaa-enc-quality', 'Data quality (ZOC)', NOAA_ENC_WMS, '8,9', '', {
     bounds: NOAA_ENC_BOUNDS,
+    coverage: NOAA_ENC_COVERAGE,
     attribution: NOAA_ENC_ATTR,
     group: NOAA_ENC_GROUP
   }),
@@ -199,8 +240,9 @@ const SOURCES: ChartSource[] = [
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const nested of Object.values(value)) deepFreeze(nested)
+    // Freeze before recursing so a cyclic reference cannot recurse forever.
     Object.freeze(value)
+    for (const key of Reflect.ownKeys(value)) deepFreeze(Reflect.get(value, key))
   }
   return value
 }
