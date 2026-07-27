@@ -1,5 +1,29 @@
 # Migration guide
 
+## Migrating from 0.4.x to 0.5.0
+
+Version 0.5.0 is a breaking pre-1.0 release. Existing `^0.4.x` dependency ranges do not select it,
+so consumers can migrate and test deliberately.
+
+- The NOAA ENC sources now carry disjoint `coverage` regions derived from the NOAA ENC product
+  catalog. `tileCountInBbox`, `tilesInBbox`, `iterateTilesInBbox`, and `estimateBytes` for
+  `depth-noaa-enc` and `depth-noaa-enc-quality` return far smaller totals than the previous
+  global-envelope behavior, and regions without any ENC chart cell count zero tiles. `bounds` still
+  carries the service display envelope. Re-verify Chart Locker cache-warming budgets and Binnacle
+  regions-panel expectations against the new numbers.
+- `estimateBytes` counts a duplicated source id once, so repeated ids no longer inflate totals.
+- Validation is stricter for consumer-constructed sources and plugin bases:
+  - Upstream URLs reject a bare trailing `?` or `#`.
+  - XYZ and WMTS templates reject tokens in the host and require each of `{z}`, `{x}`, and `{y}`
+    exactly once.
+  - WMS layer, style, and format values reject `+`, and style allowed hosts reject ports.
+  - Optional text such as attribution accepts the empty string but rejects non-empty
+    whitespace-only values.
+  - `proxyTileTemplate` plugin bases reject whitespace, control characters, `?`, `#`, and braces.
+
+Consumers that only read the built-in catalog and call tile helpers with valid inputs need no code
+changes beyond re-checking NOAA ENC counts and estimates.
+
 ## Migrating from 0.3.x to 0.4.0
 
 Version 0.4.0 is a breaking pre-1.0 release. Existing `^0.3.x` dependency ranges do not select it,

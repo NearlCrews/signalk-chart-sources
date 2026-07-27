@@ -9,6 +9,38 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-27
+
+### Added
+
+- Carry disjoint `coverage` regions on both NOAA ENC sources, derived from the NOAA ENC product
+  catalog, so tile counts, cache warming, and download estimates track actual chart coverage instead
+  of the global service envelope.
+- Open or update a tracking issue when the scheduled upstream monitor fails, so upstream drift stays
+  visible beyond the workflow failure email.
+
+### Changed
+
+- Reject bare trailing `?` and `#` markers in upstream URLs, template tokens in XYZ and WMTS hosts,
+  `+` in WMS layer, style, and format values, and ports in style allowed hosts.
+- Reject duplicate `{z}`, `{x}`, and `{y}` tokens in XYZ and WMTS templates, and reject non-empty
+  whitespace-only text in optional source fields such as attribution.
+- Validate `proxyTileTemplate` plugin bases against whitespace, control characters, `?`, `#`, and
+  braces.
+- Count duplicate source ids once in `estimateBytes`.
+- Raise the TypeScript compile target to ES2023 and drop the DOM type library for the Node.js 22
+  floor.
+
+### Fixed
+
+- Freeze catalog objects before recursing so a cyclic reference cannot loop, and freeze
+  symbol-keyed properties.
+- Bound XML entity expansion in the upstream monitor parser.
+- Extract the `npm pack` JSON report defensively in the package smoke test so npm lifecycle banners
+  cannot corrupt it.
+- Check action pins on every `uses:` step form, including named steps, in the workflow invariant
+  script, and serialize upstream monitor runs with a concurrency group.
+
 ## [0.4.0] - 2026-07-17
 
 ### Added
@@ -179,7 +211,8 @@ drift. Data and pure helpers only: no MapLibre, no Signal K, and no Node or brow
   Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
   re-validation agrees with the panel estimate. Unknown source ids are skipped.
 
-[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.2.1...v0.3.0
