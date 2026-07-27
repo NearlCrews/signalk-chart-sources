@@ -15,9 +15,13 @@ try {
   const existingTarballs = readdirSync(packDestination).filter((name) => name.endsWith('.tgz'))
   assert.deepEqual(existingTarballs, [], `pack destination already contains tarballs: ${existingTarballs.join(', ')}`)
 
-  const packed = JSON.parse(
-    execFileSync('npm', ['pack', '--json', '--pack-destination', packDestination], { encoding: 'utf8' })
-  )
+  // npm can print lifecycle banners before the JSON report, so slice from the array start.
+  const packOutput = execFileSync('npm', ['pack', '--json', '--pack-destination', packDestination], {
+    encoding: 'utf8'
+  })
+  const reportStart = packOutput.indexOf('[')
+  assert.ok(reportStart >= 0, `npm pack produced no JSON report: ${packOutput}`)
+  const packed = JSON.parse(packOutput.slice(reportStart))
   assert.equal(packed.length, 1, `npm pack produced ${packed.length} reports`)
   const result = packed[0]
   assert.ok(result?.filename)
@@ -78,7 +82,7 @@ try {
       '--noEmit',
       '--strict',
       '--target',
-      'ES2022',
+      'ES2023',
       '--module',
       'NodeNext',
       '--moduleResolution',
