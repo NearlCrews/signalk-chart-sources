@@ -58,10 +58,10 @@ import { chartSourceById, tileCountInBbox } from 'signalk-chart-sources'
 Each `ChartSource` may contain:
 
 - `bounds`: one geographic display envelope, omitted for worldwide sources.
-- `coverage`: optional disjoint warming and estimate regions. When present, tile helpers use it
-  instead of `bounds`. The NOAA ENC sources carry coverage regions derived from the NOAA ENC product
-  catalog, so their counts and estimates track actual chart coverage instead of the global service
-  envelope.
+- `coverage`: optional warming and estimate regions. When present, tile helpers use it instead of
+  `bounds`. Regions need not be disjoint, because tile helpers deduplicate overlaps. The NOAA ENC
+  sources carry coverage regions derived from the NOAA ENC product catalog, so their counts and
+  estimates track actual chart coverage instead of the global service envelope.
 - `fallbackTileBytes`: a conservative first-download estimate used until a measured average exists.
 - `vectorMaxzoom`: the native vector-data maximum, below the visual overzoom ceiling when needed.
 
@@ -72,59 +72,82 @@ metadata instead of mutating catalog entries.
 
 - `LngLatBbox`: `[west, south, east, north]` in degrees.
 - `MercatorBbox`: `[minX, minY, maxX, maxY]` in EPSG:3857 meters.
-- `Bbox`: compatibility alias for `LngLatBbox`; new code should use the unit-specific name.
 - `ZoomRange`: inclusive `[minzoom, maxzoom]` integers.
 - `ZXY`: readonly `{ z, x, y }` tile coordinate.
 - `TileEnumerationOptions`: currently `{ maxTiles?: number }`.
 
 A longitude-latitude box crosses the antimeridian when `west > east`. Degenerate boxes, invalid
-latitudes or longitudes, and non-finite values throw `RangeError`. `[180, south, -180, north]` has a
-zero longitude span and is invalid even though its west value is greater than its east value.
+latitudes or longitudes, and non-finite values throw `RangeError`. Both `[180, south, -180, north]`
+and any box whose west equals its east have a zero longitude span and are invalid, the first even
+though its west value is greater than its east value.
 
 ### Tile math
 
 - `webMercatorTileBounds(z, x, y)`: return the EPSG:3857 bounds of one valid XYZ tile.
-- `tileForLngLat(lng, lat, z)`: return the integer tile containing a finite point. Latitude clamps to
-  `MAX_MERCATOR_LAT`, and finite longitudes outside `[-180, 180]` clamp to an edge tile.
+- `tileForLngLat(lng, lat, z)`: return the readonly `{ x, y }` of the integer tile containing a
+  finite point, without the `z` that `ZXY` carries. Latitude clamps to `MAX_MERCATOR_LAT`, and finite
+  longitudes outside `[-180, 180]` clamp to an edge tile.
 - `tileCountInBbox(source, bbox, zoomRange)`: count distinct tiles without allocating the tile list.
 - `tilesInBbox(source, bbox, zoomRange, options)`: return distinct tiles as an array. The default
   `maxTiles` is `DEFAULT_MAX_ENUMERATED_TILES`, currently 1,000,000.
-- `iterateTilesInBbox(source, bbox, zoomRange, options)`: lazily yield the same distinct tiles. It
-  still validates the total against `maxTiles` before yielding.
+- `iterateTilesInBbox(source, bbox, zoomRange, options)`: lazily yield the same distinct tiles.
+  Inputs and the total are checked against `maxTiles` when the call is made, not when the generator
+  is first advanced, so a rejected request fails closed even if the caller never iterates.
 - `MAX_MERCATOR_LAT`: the Web Mercator latitude limit, approximately 85.0511 degrees.
 - `MAX_TILE_ZOOM`: the highest accepted zoom, currently 30.
 - `DEFAULT_MAX_ENUMERATED_TILES`: the defensive default enumeration limit.
 
 Tile helpers validate source metadata, coordinates, zooms, zoom ordering, and safe-integer counts.
-Invalid inputs throw instead of returning partial or ambiguous results. Geographic bbox edges are
-inclusive for conservative warming, so a box ending exactly on a tile boundary includes the tile on
-both sides of that boundary.
+Invalid inputs throw instead of returning partial or ambiguous results. A wrong shape or type throws
+`TypeError`, and a value outside its permitted range throws `RangeError`, so a source definition can
+raise either depending on which part of it is wrong. Catch both at request and UI boundaries.
+
+Geographic bbox edges are inclusive for conservative warming, and that inclusivity is directional
+because the tile index always floors. A box whose east or south edge lands exactly on a tile boundary
+also covers the tile beyond that edge; a box whose west or north edge lands on a boundary does not
+reach back across it.
 
 ### URL construction
 
 - `expandUpstreamUrl(source, z, x, y)`: validate the source and coordinate, substitute XYZ or WMTS
   tokens, construct WMS or ArcGIS parameters, or return a style URL.
-- `proxyTileTemplate(pluginBase, sourceId)`: normalize a trailing slash on the plugin base, validate
+- `proxyTileTemplate(pluginBase, sourceId)`: normalize trailing slashes on the plugin base, validate
   the base and the path-safe source id, and return the Chart Locker tile template.
 
 `expandUpstreamUrl` only constructs a string. The consuming application performs the network request.
 Source validation requires bounded HTTPS URLs without credentials or fragments, including a bare
-trailing `#`. XYZ and WMTS templates may contain only `{z}`, `{x}`, and `{y}` tokens, each exactly
-once, and the host may not contain tokens. WMS and ArcGIS base URLs may not contain query parameters
-or a bare trailing `?`, WMS version must be `1.3.0`, and WMS layer, style, and format values may not
-inject query delimiters or `+`. Optional text fields accept the empty string but reject non-empty
-whitespace-only values. Style hosts are validated without ports, deduplicated case-insensitively, and
-must authorize the style URL itself.
+trailing `#`. URL fields also reject invisible characters, because IDNA discards them and a host
+carrying one reads as a different host than the one the request reaches. XYZ and WMTS templates may
+contain only `{z}`, `{x}`, and `{y}` tokens, each exactly once, the host may not contain tokens, and
+no other brace may survive expansion. WMS and ArcGIS base URLs may not contain query parameters or a
+bare trailing `?`, WMS version must be `1.3.0`, and WMS layer, style, and format values may not
+inject query delimiters, `+`, `;`, or `=`. WMS `LAYERS` may not contain an empty entry, and `STYLES`
+must be either empty or name one style per requested layer, as WMS 1.3.0 pairs the two lists by
+position. Optional text fields accept the empty string but reject non-empty whitespace-only values.
+Style hosts are validated without ports, deduplicated case-insensitively, and must authorize the
+style URL itself. Plugin bases reject whitespace, control characters, `?`, `#`, braces, and
+backslashes.
+
+Only a `style` source carries a host allowlist. For XYZ, WMTS, WMS, and ArcGIS sources, validation
+constrains the shape of the URL but not its destination, because the catalog is what decides which
+hosts are legitimate. An application that accepts source definitions from anywhere other than this
+catalog must apply its own host policy on top of `validateChartSource`.
+
+The WMS and ArcGIS `BBOX` parameter is always written in plain decimal. A tile edge that falls on the
+projection origin arrives from the tile math as floating-point residue near zero, which would
+otherwise render in exponential notation that the OGC `BBOX` grammar does not admit.
 
 ### Download planning
 
 - `estimateBytes(sourceIds, bbox, zoomRange, perSourceAvgBytes)`: multiply distinct tile counts by a
   positive measured average or a conservative first-download fallback. Duplicate source ids are
   counted once.
-- `DEFAULT_TILE_BYTES`: generic fallback, currently 512,000 bytes.
-- `DEFAULT_TILE_BYTES_BY_MODE`: fallbacks for XYZ, WMTS, WMS, ArcGIS, and style modes.
+- `DEFAULT_TILE_BYTES_BY_MODE`: per-mode fallbacks for XYZ, WMTS, WMS, ArcGIS, and style. A source
+  without its own `fallbackTileBytes` falls back to the entry for its mode.
 
-Unknown source ids, invalid measured averages, and totals beyond `Number.MAX_SAFE_INTEGER` throw.
+`perSourceAvgBytes` is read by own property only, so an average inherited through the prototype chain
+is ignored rather than treated as a measurement. Unknown source ids, invalid measured averages, and
+totals beyond `Number.MAX_SAFE_INTEGER` throw.
 Compressed tile sizes vary, so no average is a mathematical upper bound. Servers must enforce actual
 transferred-byte and tile-count limits while processing a download.
 
@@ -182,22 +205,27 @@ metadata. It parses configured WMS layers, styles, formats, CRS support, WMTS ma
 the complete transitive style and TileJSON host graph. Verify the upstream service before changing
 catalog data.
 
-## Migrating to 0.5.0
+## Migrating to 0.6.0
 
-Version 0.5.0 includes intentional compatibility changes:
+Version 0.6.0 includes intentional compatibility changes:
 
-- The NOAA ENC sources carry catalog-derived `coverage` regions, so their tile counts and download
-  estimates are far smaller and track actual chart coverage instead of the global service envelope.
-- `estimateBytes` counts a duplicated source id once.
-- Source validation additionally rejects bare trailing `?` and `#` markers, template tokens in XYZ
-  and WMTS hosts, duplicate `{z}`, `{x}`, and `{y}` tokens, `+` in WMS layer, style, and format
-  values, ports in style allowed hosts, and non-empty whitespace-only optional text.
-- `proxyTileTemplate` validates plugin bases against whitespace, control characters, `?`, `#`, and
-  braces.
+- The `Bbox` type alias and the `DEFAULT_TILE_BYTES` export are removed. Use `LngLatBbox`, which
+  names its units, and `DEFAULT_TILE_BYTES_BY_MODE`, which `estimateBytes` actually consults.
+- A box whose west equals its east is rejected as degenerate. It previously read as an antimeridian
+  wrap and silently became worldwide coverage.
+- `iterateTilesInBbox` validates when it is called rather than when the generator is first advanced,
+  so an abandoned iterator still fails closed.
+- The WMS and ArcGIS `BBOX` parameter is written in plain decimal, which changes the request URL for
+  tiles whose edges fall on the projection origin.
+- Consumer-supplied WMS sources must pair `STYLES` with `LAYERS` by position, and validation rejects
+  more characters: `;` and `=` in WMS values, backslashes in plugin bases, C1 controls in source
+  text, and invisible characters in URLs.
+- `tileForLngLat` returns a readonly tile, and `estimateBytes` reads measured averages from own
+  properties only.
 
 Consumers should type-check against the release before upgrading and review every call that accepts
 untrusted geometry, statistics, or source ids. See [MIGRATING.md](MIGRATING.md) for an upgrade
-checklist and the earlier 0.4.0 and 0.3.x migrations.
+checklist and the earlier 0.5.0, 0.4.0, and 0.3.x migrations.
 
 ## Development
 

@@ -1,8 +1,9 @@
 # Code Review: signalk-chart-sources
 
-Reviewed: 2026-07-27 against `v0.4.0` (commit `261bc3a`) with Unreleased changes staged.
-REVIEW.md records the prior v0.4.0 review. This document is an independent follow-up focused on what
-remains after that hardening pass.
+Historical record: reviewed 2026-07-27 against `v0.4.0` (commit `261bc3a`) with the then-unreleased
+changes staged. Every item in its improvement plan shipped in v0.5.0, so the findings and the plan
+below describe a tree that no longer exists. REVIEW.md records the earlier v0.4.0 review. Neither
+document is current; the README and AGENTS.md carry the live contract.
 
 ## 1. Scope and context
 

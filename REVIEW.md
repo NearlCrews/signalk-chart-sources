@@ -1,7 +1,8 @@
 # Code Review Plan: signalk-chart-sources v0.4.0
 
 Historical record: this review was completed 2026-07-17 for the v0.4.0 release and does not reflect
-later changes. See CODE_REVIEW.md for the follow-up review of the current tree.
+later changes. CODE_REVIEW.md records the follow-up review, and is itself historical. Neither
+document tracks the current tree; the README and AGENTS.md carry the live contract.
 
 ## Methodology
 

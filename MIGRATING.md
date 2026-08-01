@@ -1,5 +1,35 @@
 # Migration guide
 
+## Migrating from 0.5.x to 0.6.0
+
+Version 0.6.0 is a breaking pre-1.0 release. Existing `^0.5.x` dependency ranges do not select it,
+so consumers can migrate and test deliberately. These changes alter accepted input, the moment an
+error surfaces, or the public type surface. Consumers that only read the built-in catalog and pass
+valid inputs need no code changes.
+
+- A bounding box whose west equals its east is now rejected as degenerate. It previously fell into
+  the antimeridian wrap and silently expanded to worldwide coverage, so any caller that relied on
+  that accidental behavior now receives a `RangeError` instead of a global result.
+- `iterateTilesInBbox` validates its inputs and the `maxTiles` total when it is called rather than
+  when the returned generator is first advanced. Code that builds an iterator inside a `try` block
+  and advances it outside must move the call inside the block.
+- Consumer-supplied WMS sources must list one `STYLES` entry per `LAYERS` entry, or leave `STYLES`
+  empty, and `LAYERS` may not contain an empty entry. A mismatched pair previously validated and
+  produced a request no compliant server answers.
+- Source text and URL fields reject more characters: `;` and `=` in WMS layer, style, and format
+  values, backslashes in `proxyTileTemplate` plugin bases, C1 controls in source text, and invisible
+  characters such as zero-width spaces and bidirectional marks in URLs.
+- `estimateBytes` reads `perSourceAvgBytes` by own property only. An average reaching it through the
+  prototype chain is now ignored rather than used.
+- `tileForLngLat` returns a readonly `{ x, y }`. Code that mutated the returned object must copy it
+  first.
+- The `Bbox` type alias is removed. Import `LngLatBbox` instead, which names the units.
+- The `DEFAULT_TILE_BYTES` export is removed. `estimateBytes` could never reach it, because
+  `DEFAULT_TILE_BYTES_BY_MODE` covers every upstream mode. Use that table, or the mode entry you
+  want, in its place.
+- The WMS and ArcGIS `BBOX` parameter is written in plain decimal. Any cache keyed on the exact
+  request URL will see new keys for the tiles whose edges fall on the projection origin.
+
 ## Migrating from 0.4.x to 0.5.0
 
 Version 0.5.0 is a breaking pre-1.0 release. Existing `^0.4.x` dependency ranges do not select it,

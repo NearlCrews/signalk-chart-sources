@@ -9,6 +9,69 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-31
+
+### Added
+
+- Validate that WMS `LAYERS` contains no empty entry and that `STYLES` is either empty or names one
+  style per requested layer, matching how WMS 1.3.0 pairs the two lists by position.
+- Reject invisible characters in URL fields. IDNA discards them, so a host carrying one validated as
+  written while resolving somewhere else.
+- Pin the public export surface in both the test suite and the packed-tarball smoke test, from one
+  shared list, and exercise the main helpers and every public type against the installed package.
+- Verify the WMTS tile matrix top-left corner against the projection origin the tile math assumes,
+  and follow array-form `sprite` and geojson `data` references when discovering style hosts.
+- Report every drifted source from one upstream monitor run instead of stopping at the first, and
+  close the drift tracking issue once the upstreams are healthy again.
+
+### Changed
+
+- Write the WMS and ArcGIS `BBOX` parameter in plain decimal. Tile edges on the projection origin
+  arrive as floating-point residue and previously rendered in exponential notation, which the OGC
+  `BBOX` grammar does not admit.
+- Validate inputs in `iterateTilesInBbox` when it is called rather than when the returned generator
+  is first advanced, so an abandoned iterator still fails closed. `maxTiles` is now checked before
+  any counting work.
+- Reject a bounding box whose west equals its east. Such a box has no width, but was read through the
+  antimeridian wrap and silently became worldwide coverage.
+- Reject `;` and `=` in WMS layer, style, and format values, and backslashes in `proxyTileTemplate`
+  plugin bases.
+- Reject C1 control characters in source text, and read `estimateBytes` averages from own properties
+  only so an inherited entry cannot stand in for a measurement.
+- Build the upstream URL from a snapshot of the validated source, so a source defined with accessor
+  properties cannot return one value to the validator and another to the builder.
+- Enforce group title and attribution coherence when the catalog is built rather than only in tests.
+- Truncate rejected input echoed into validation errors.
+- Return a readonly tile from `tileForLngLat`.
+
+### Removed
+
+- Remove the `Bbox` type alias. `LngLatBbox` names the units and is the only spelling the library
+  now uses.
+- Remove the `DEFAULT_TILE_BYTES` export. `estimateBytes` could never reach it, because
+  `DEFAULT_TILE_BYTES_BY_MODE` is total over the upstream modes.
+
+### Fixed
+
+- Close a gap in the workflow action-pin check that passed any `uses:` reference without an `@`, add
+  an allowlist for job-level permission escalations, and read each checkout step from the parsed
+  workflow so one step's credential setting cannot satisfy another's.
+- Grant issue write access only to the upstream monitor job that files the tracking issue, leaving
+  the job that installs dependencies and parses capability documents read-only.
+- Surface child-process output when the package smoke test fails, and assert that `README.md` and
+  `LICENSE` are packed.
+- Release the response body reader when the upstream monitor trips its size cap, honor the
+  positional `STYLES` pairing when verifying WMS capabilities, and stop treating an absent
+  `content-length` header as a declared length of zero.
+- Keep the CI whitespace lane working when the base commit is missing after a force push.
+
+### Performance
+
+- Cut per-tile URL expansion time by roughly two to seven times, by removing the string copies that
+  source revalidation made for every text field on every tile and by building the BBOX parameter
+  without an intermediate array. The gain scales with attribution length, so the sources carrying
+  long attributions benefit most.
+
 ## [0.5.0] - 2026-07-27
 
 ### Added
@@ -211,7 +274,8 @@ drift. Data and pure helpers only: no MapLibre, no Signal K, and no Node or brow
   Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
   re-validation agrees with the panel estimate. Unknown source ids are skipped.
 
-[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.3.0...v0.3.1
