@@ -16,9 +16,6 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -29,22 +26,53 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:upstreams
-      - name: Open or update the drift tracking issue
-        if: failure()
+
+  # Issue write access lives in its own job, so the job that installs dependencies and parses
+  # untrusted capability documents stays read-only. This job checks out nothing and runs no
+  # project code.
+  track:
+    needs: check
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open, update, or close the drift tracking issue
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CHECK_RESULT: ${{ needs.check.result }}
         with:
           script: |
             const title = 'Upstream monitor failure'
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
-            const body = `The scheduled upstream monitor failed. See ${runUrl} for the drift details.`
-            const { data: issues } = await github.rest.issues.listForRepo({
+            // Paginate and skip pull requests: listForRepo returns both, and one page is not enough
+            // to conclude the tracking issue is absent.
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
               ...context.repo,
               state: 'open',
               per_page: 100
             })
-            const existing = issues.find((issue) => issue.title === title)
+            const existing = issues.find((issue) => !issue.pull_request && issue.title === title)
+
+            if (process.env.CHECK_RESULT !== 'success') {
+              const body = `The scheduled upstream monitor failed. See ${runUrl} for every drifted source.`
+              if (existing) {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body })
+              } else {
+                await github.rest.issues.create({ ...context.repo, title, body })
+              }
+              return
+            }
+
+            // Close the tracker once the upstreams are healthy again, so an open issue always means
+            // current drift rather than drift that was resolved weeks ago.
             if (existing) {
-              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body })
-            } else {
-              await github.rest.issues.create({ ...context.repo, title, body })
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: existing.number,
+                body: `Upstream checks passed in ${runUrl}. Closing until the next drift.`
+              })
+              await github.rest.issues.update({ ...context.repo, issue_number: existing.number, state: 'closed' })
             }
