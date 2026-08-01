@@ -7,8 +7,7 @@ export {
   tileCountInBbox,
   tileForLngLat,
   tilesInBbox,
-  webMercatorTileBounds,
-  type ZXY
+  webMercatorTileBounds
 } from './mercator.js'
 export { CHART_SOURCES, chartSourceById } from './registry.js'
 export type {
@@ -18,6 +17,7 @@ export type {
   MercatorBbox,
   TileEnumerationOptions,
   UpstreamTemplate,
-  ZoomRange
+  ZoomRange,
+  ZXY
 } from './types.js'
 export { MAX_TILE_ZOOM, validateChartSource } from './validate.js'

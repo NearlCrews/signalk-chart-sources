@@ -24,6 +24,11 @@ function materialize(source: ChartSource): ChartSource {
 
 const ZXY_TOKEN = /\{(z|x|y)\}/g
 
+/**
+ * Drop trailing slashes from a base URL. ArcGIS needs it because the export path is appended and a
+ * kept slash would double up. WMS gets the same treatment so one base cannot produce two spellings
+ * of the same request, which would split a proxy's cache for no benefit.
+ */
 function withoutTrailingSlashes(value: string): string {
   let end = value.length
   while (end > 0 && value.charCodeAt(end - 1) === 47) end--
@@ -75,16 +80,15 @@ export function expandUpstreamUrl(candidate: ChartSource, z: number, x: number, 
       // edge independently, so the two paths can still differ in a coordinate's final digit.
       const bbox = mercatorBboxParam(z, x, y)
       return (
-        `${u.base}?SERVICE=WMS&VERSION=${u.version}&REQUEST=GetMap&LAYERS=${u.layers}` +
+        `${withoutTrailingSlashes(u.base)}?SERVICE=WMS&VERSION=${u.version}&REQUEST=GetMap&LAYERS=${u.layers}` +
         `&CRS=EPSG:3857&BBOX=${bbox}&WIDTH=${source.tileSize}&HEIGHT=${source.tileSize}` +
         `&FORMAT=${u.format}&TRANSPARENT=${u.transparent}&STYLES=${u.styles}`
       )
     }
     case 'arcgis': {
       const bbox = mercatorBboxParam(z, x, y)
-      const base = withoutTrailingSlashes(u.base)
       return (
-        `${base}/export?bbox=${bbox}&bboxSR=3857&imageSR=3857` +
+        `${withoutTrailingSlashes(u.base)}/export?bbox=${bbox}&bboxSR=3857&imageSR=3857` +
         `&size=${source.tileSize},${source.tileSize}&dpi=96&format=png32&transparent=true&f=image`
       )
     }
