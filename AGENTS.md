@@ -37,14 +37,20 @@ Mercator tile math, and conservative download estimates. It is not a Signal K pl
 Run all of these before handing off a change:
 
 ```bash
+npm run verify:commit
 npm run typecheck
 npm test
 npm run test:coverage
 npm run build
 npm run test:package
 npm audit
+npm run audit:runtime
 git diff --check
 ```
+
+`npm run verify` runs all of the above except `git diff --check`. `verify:commit` covers the
+formatting, linting, workflow-invariant, spelling, and dead-code checks that CI enforces separately
+from the build.
 
 Run `npm run test:upstreams` when catalog data, source validation, or monitoring changes. It performs
 live network requests and is intentionally separate from normal pull-request checks.

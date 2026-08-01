@@ -46,9 +46,12 @@ When depending on this package:
 1. **Keep Updated**: use the latest published version and review its migration notes.
 2. **Validate Inputs**: treat coordinates, boxes, zooms, source definitions, source ids, enumeration
    limits, and estimate statistics as untrusted at application boundaries.
-3. **Enforce Limits**: use count and estimate helpers for planning, then enforce request
+3. **Constrain Destinations**: `validateChartSource` checks the shape of an upstream URL, not where it
+   points. Only a `style` source carries a host allowlist. Apply your own host policy before building
+   a request from a source definition that did not come from this catalog.
+4. **Enforce Limits**: use count and estimate helpers for planning, then enforce request
    authorization, maximum tile counts, and actual transferred-byte limits in the consuming server.
-4. **Handle Errors**: do not convert validation errors into unrestricted or worldwide requests.
+5. **Handle Errors**: do not convert validation errors into unrestricted or worldwide requests.
 
 ## Dependency Security
 
