@@ -10,6 +10,9 @@ export type MercatorBbox = readonly [minX: number, minY: number, maxX: number, m
 /** An inclusive [minzoom, maxzoom] pair. */
 export type ZoomRange = readonly [minzoom: number, maxzoom: number]
 
+/** A single tile address in the XYZ scheme. */
+export type ZXY = Readonly<{ z: number; x: number; y: number }>
+
 /** A group descriptor shared by a source and its facets, so the webapp can aggregate them. */
 export interface ChartGroup {
   readonly id: string
@@ -18,7 +21,16 @@ export interface ChartGroup {
 
 /** Everything required to build or authorize an upstream request. */
 export type UpstreamTemplate =
-  | { readonly mode: 'xyz'; readonly urlTemplate: string }
+  | {
+      readonly mode: 'xyz'
+      readonly urlTemplate: string
+      /**
+       * The TileJSON the service publishes for this tileset, when it publishes one. A tile template
+       * carries no metadata of its own, so this is what lets the scheduled monitor check the
+       * transcribed attribution and zoom ceiling against what the service currently serves.
+       */
+      readonly tileJsonUrl?: string
+    }
   | { readonly mode: 'wmts'; readonly urlTemplate: string }
   | {
       readonly mode: 'wms'
@@ -58,6 +70,14 @@ export interface ChartSource {
   readonly coverage?: readonly LngLatBbox[]
   /** Conservative first-download estimate used until a measured average exists. */
   readonly fallbackTileBytes?: number
+  /**
+   * How long a fetched tile stays usable, in seconds. Absent means the source is static and a cache
+   * may keep a tile indefinitely. Present means the source is time-dynamic: a cache must treat a
+   * tile older than this as expired, and must not warm the source ahead of time, because the frames
+   * it would store are stale before anyone sails into them. Weather radar and hazard overlays carry
+   * this; bathymetry and chart display do not.
+   */
+  readonly maxAgeSeconds?: number
   readonly attribution: string
   readonly group?: ChartGroup
 }

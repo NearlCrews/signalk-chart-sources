@@ -153,6 +153,105 @@ test('validateChartSource rejects bare query and fragment markers, host tokens, 
   )
 })
 
+test('every URL field rejects ports, address literals, and the loopback name', () => {
+  // A source definition names a public chart service. Rejecting these at definition time is the
+  // static half of the SSRF story; the consuming server still checks the address a name resolves to,
+  // which is the only place a rebind can be caught.
+  const rejected: ReadonlyArray<readonly [string, RegExp]> = [
+    ['https://h:8443/wms', /must not include a port/],
+    ['https://localhost/wms', /must not name the loopback host/],
+    ['https://tiles.localhost/wms', /must not name the loopback host/],
+    ['https://127.0.0.1/wms', /IP address literal/],
+    ['https://169.254.169.254/wms', /IP address literal/],
+    ['https://10.0.0.1/wms', /IP address literal/],
+    // The URL parser rewrites the octal and integer spellings of 127.0.0.1 to the dotted quad, so
+    // one pattern covers every way of writing the same address.
+    ['https://0177.0.0.1/wms', /IP address literal/],
+    ['https://2130706433/wms', /IP address literal/],
+    ['https://[::1]/wms', /IP address literal/]
+  ]
+  for (const [base, message] of rejected) {
+    assert.throws(() => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, base } }), message, base)
+    assert.throws(
+      () => validateChartSource(makeSource({ upstream: { mode: 'arcgis', base } })),
+      message,
+      `arcgis ${base}`
+    )
+  }
+  // The same rules reach a tile template, which is checked after its tokens are substituted.
+  assert.throws(
+    () => validateChartSource(makeSource({ upstream: { mode: 'xyz', urlTemplate: 'https://h:8443/{z}/{x}/{y}.png' } })),
+    /must not include a port/
+  )
+  assert.throws(
+    () =>
+      validateChartSource(makeSource({ upstream: { mode: 'wmts', urlTemplate: 'https://127.0.0.1/{z}/{x}/{y}.png' } })),
+    /IP address literal/
+  )
+  // And a style URL and its allowed hosts, which is where a proxy decides what to fetch.
+  assert.throws(
+    () =>
+      validateChartSource(
+        makeSource({
+          upstream: { mode: 'style', styleUrl: 'https://127.0.0.1/style.json', allowedHosts: ['127.0.0.1'] }
+        })
+      ),
+    /IP address literal/
+  )
+  assert.throws(
+    () =>
+      validateChartSource(
+        makeSource({
+          upstream: { mode: 'style', styleUrl: 'https://tiles.example/style.json', allowedHosts: ['localhost'] }
+        })
+      ),
+    /must not name the loopback host/
+  )
+  // A hostname that merely contains a rejected substring is still a normal public host.
+  assert.doesNotThrow(() =>
+    validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, base: 'https://localhost.example.org/wms' } })
+  )
+  // The parser drops an explicit default port, so this is indistinguishable from no port at all.
+  assert.doesNotThrow(() =>
+    validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, base: 'https://h:443/wms' } })
+  )
+})
+
+test('an xyz tileJsonUrl is optional and validated like any other URL field', () => {
+  const withTileJson = (tileJsonUrl: unknown) =>
+    makeSource({
+      upstream: {
+        mode: 'xyz',
+        urlTemplate: 'https://tiles.example/{z}/{x}/{y}.png',
+        tileJsonUrl
+      } as never
+    })
+  assert.doesNotThrow(() => validateChartSource(withTileJson('https://tiles.example/tiles.json')))
+  // Absent is the common case: only a service that publishes one declares it.
+  assert.doesNotThrow(() => validateChartSource(makeSource()))
+  for (const [value, message] of [
+    ['http://tiles.example/tiles.json', /must use https/],
+    ['https://127.0.0.1/tiles.json', /IP address literal/],
+    ['https://tiles.example:8443/tiles.json', /must not include a port/],
+    ['tiles.example/tiles.json', /absolute URL/]
+  ] as const) {
+    assert.throws(() => validateChartSource(withTileJson(value)), message, String(value))
+  }
+})
+
+test('maxAgeSeconds must be absent or a positive safe integer', () => {
+  assert.doesNotThrow(() => validateChartSource(makeSource({ maxAgeSeconds: 300 })))
+  // Absent is the common case: a static source must not be forced to declare a TTL.
+  assert.doesNotThrow(() => validateChartSource(makeSource()))
+  for (const value of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1, '300']) {
+    assert.throws(
+      () => validateChartSource(makeSource({ maxAgeSeconds: value as number })),
+      /maxAgeSeconds must be a positive safe integer/,
+      String(value)
+    )
+  }
+})
+
 test('WMS layer and style lists must be structurally answerable by a 1.3.0 server', () => {
   // Two layers, so a style list that does not pair with them is detectable.
   const wms = { ...wmsUpstream, layers: 'a,b' } as const
