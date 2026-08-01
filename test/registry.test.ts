@@ -15,6 +15,12 @@ const src = (id: string): ChartSource => {
 const inBox = (b: LngLatBbox | undefined, lng: number, lat: number): boolean =>
   b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
 
+/** Whether any of a source's coverage regions contains a point, for the drift guards below. */
+const coveredBy =
+  (source: ChartSource) =>
+  (lng: number, lat: number): boolean =>
+    (source.coverage ?? []).some((b) => inBox(b, lng, lat))
+
 test('every source id is unique', () => {
   const ids = CHART_SOURCES.map((s) => s.id)
   assert.equal(new Set(ids).size, ids.length)
@@ -35,14 +41,22 @@ test('every non-style source expands to an absolute https URL at its minzoom', (
   }
 })
 
-test('the basemap is the single style source and carries an allowed host', () => {
+test('the basemaps are the only style sources and each carries an allowed host', () => {
   const styles = CHART_SOURCES.filter((s) => s.upstream.mode === 'style')
-  assert.equal(styles.length, 1)
-  const basemap = styles[0]
-  assert.ok(basemap, 'the style source must exist')
-  assert.equal(basemap.id, 'basemap')
-  assert.ok(basemap.upstream.mode === 'style')
-  assert.deepEqual(basemap.upstream.allowedHosts, ['tiles.openfreemap.org'])
+  assert.deepEqual(
+    styles.map((s) => s.id),
+    ['basemap', 'basemap-dark']
+  )
+  for (const style of styles) {
+    assert.ok(style.upstream.mode === 'style')
+    // Both variants are served whole from one host, so an allowlist that grew a second entry means
+    // the style graph moved and the proxy needs re-checking.
+    assert.deepEqual(style.upstream.allowedHosts, ['tiles.openfreemap.org'], `${style.id} allowed hosts`)
+    assert.ok(
+      style.upstream.styleUrl.startsWith('https://tiles.openfreemap.org/styles/'),
+      `${style.id} style URL must stay on the OpenFreeMap style path`
+    )
+  }
 })
 
 test('key sources pin their transcribed upstream data (drift guard)', () => {
@@ -99,9 +113,12 @@ test('chart bounds preserve service coverage envelopes', () => {
   // NOAA ENC reports a global service envelope because it includes remote US chart coverage.
   assert.equal(inBox(src('depth-noaa-enc').bounds, 144.8, 13.5), true)
   assert.equal(inBox(src('depth-noaa-enc').bounds, -71.3, 41.5), true)
-  // EMODnet is EU only: a US northeast point (Boston) is outside it; an EU point (English Channel) is inside.
-  assert.equal(inBox(src('depth-emodnet').bounds, -71, 42.3), false)
+  // EMODnet reaches the Caribbean overseas territories, so its display envelope has to span the
+  // Atlantic. Where it actually has data is the coverage list's job, which is asserted below; the
+  // envelope only has to contain it.
   assert.equal(inBox(src('depth-emodnet').bounds, 0, 50), true)
+  assert.equal(inBox(src('depth-emodnet').bounds, -62, 16), true)
+  assert.equal(inBox(src('depth-emodnet').bounds, -140, 40), false)
   // The EU protected-area layers now carry bounds so they self-hide outside Europe.
   assert.ok(src('mpa-emodnet').bounds)
   assert.ok(src('mpa-natura2000').bounds)
@@ -186,13 +203,104 @@ test('NOAA ENC coverage pins the chart regions from the ENC product catalog (dri
     [-40, -78.4, -30, -75]
   ])
   // The first region is the densest one, so the upstream monitor samples a representative US tile.
-  const covered = (lng: number, lat: number): boolean => (enc.coverage ?? []).some((b) => inBox(b, lng, lat))
+  const covered = coveredBy(enc)
   assert.equal(covered(-76.2, 37.5), true, 'Chesapeake Bay must be covered')
   assert.equal(covered(144.8, 13.5), true, 'Guam must be covered')
   assert.equal(covered(-157.9, 21.3), true, 'Honolulu must be covered')
   assert.equal(covered(-146, 61), true, 'Prince William Sound must be covered')
   assert.equal(covered(0, 50), false, 'the English Channel must not be covered')
   assert.equal(covered(-15, -30), false, 'the South Atlantic must not be covered')
+})
+
+test('EMODnet coverage pins the sampled DTM regions (drift guard)', () => {
+  const emodnet = src('depth-emodnet')
+  // The bathymetry, its quality index, and its contours are the same grid, so they must warm the
+  // same ground. Sharing one constant is what makes that true; this catches it being unshared.
+  assert.deepEqual(src('depth-emodnet-quality').coverage, emodnet.coverage)
+  assert.deepEqual(src('depth-emodnet-contours').coverage, emodnet.coverage)
+  // Disjoint by construction, so each box is exactly the region its comment names and none is
+  // implied by a neighbor. tileCountInBbox deduplicates overlaps, so this is for the reader.
+  assert.deepEqual(emodnet.coverage, [
+    [-37.5, 27.5, 40.0, 85.0],
+    [40.0, 40.0, 45.0, 85.0],
+    [-37.5, 15.0, -12.5, 27.5],
+    [-72.5, 10.0, -57.5, 20.0],
+    [32.5, 22.5, 37.5, 27.5],
+    [35.0, 15.0, 42.5, 25.0],
+    [42.5, 15.0, 45.0, 17.5]
+  ])
+  const covered = coveredBy(emodnet)
+  assert.equal(covered(0, 50), true, 'the English Channel must be covered')
+  assert.equal(covered(-28, 38.5), true, 'the Azores must be covered')
+  assert.equal(covered(-16, 28.3), true, 'the Canaries must be covered')
+  assert.equal(covered(-61.5, 16.2), true, 'Guadeloupe must be covered')
+  assert.equal(covered(20, 63), true, 'the Gulf of Bothnia must be covered')
+  // The advertised bbox reaches these; the sampled data does not, which is the whole point.
+  assert.equal(covered(-71, 42.3), false, 'Boston must not be covered')
+  assert.equal(covered(10, 20), false, 'the Sahara must not be covered')
+})
+
+test('NOAA MPA coverage pins the inventory regions (drift guard)', () => {
+  const mpa = src('mpa-noaa')
+  assert.deepEqual(mpa.coverage, [
+    [-180, 12, -156, 30],
+    [-156, 18, -154, 22],
+    [176, 28, 180, 32],
+    [-180, 44, -118, 76],
+    [166, 46, 180, 58],
+    [-130, 30, -116, 44],
+    [-100, 24, -98, 28],
+    [-98, 22, -64, 48],
+    [-90, 48, -88, 50],
+    [-76, 16, -64, 22],
+    [142, 10, 150, 16],
+    [142, 16, 172, 24],
+    [-164, -4, -156, 8],
+    [-178, -2, -174, 2],
+    [-172, -16, -166, -10]
+  ])
+  const covered = coveredBy(mpa)
+  // Every one of these sat outside the old [-180, 15, -60, 75] box, which is the bug being fixed.
+  assert.equal(covered(144.75, 13.45), true, 'Guam must be covered')
+  assert.equal(covered(145.75, 15.2), true, 'the Northern Marianas must be covered')
+  assert.equal(covered(-170.7, -14.3), true, 'American Samoa must be covered')
+  assert.equal(covered(166.6, 19.3), true, 'Wake Island must be covered')
+  assert.equal(covered(-162.1, 5.9), true, 'Palmyra Atoll must be covered')
+  // And these were already inside it and must stay covered.
+  assert.equal(covered(-121.9, 36.6), true, 'Monterey Bay must be covered')
+  assert.equal(covered(-81.8, 24.5), true, 'the Florida Keys must be covered')
+  assert.equal(covered(-176.6, 51.9), true, 'the Aleutians must be covered')
+  assert.equal(covered(0, 50), false, 'the English Channel must not be covered')
+})
+
+test('only time-dynamic sources carry a TTL, and every one of them caps its zoom', () => {
+  const volatile = CHART_SOURCES.filter((s) => s.maxAgeSeconds !== undefined)
+  assert.deepEqual(
+    volatile.map((s) => s.id),
+    [
+      'weather-radar-conus',
+      'weather-radar-alaska',
+      'weather-radar-hawaii',
+      'weather-radar-caribbean',
+      'weather-tropical',
+      'weather-alerts-us',
+      'ocean-sst-global'
+    ]
+  )
+  for (const s of volatile) {
+    assert.ok(
+      s.maxAgeSeconds !== undefined && Number.isSafeInteger(s.maxAgeSeconds) && s.maxAgeSeconds > 0,
+      `${s.id} TTL must be a positive safe integer`
+    )
+    // A cache re-fetches these on a timer, so the tile count is a recurring cost rather than a
+    // one-time warm. The chart-display ceiling would multiply that by hundreds.
+    assert.ok(s.maxzoom <= 10, `${s.id} maxzoom ${s.maxzoom} is too deep for a source that re-fetches on a timer`)
+  }
+  // Bathymetry and chart display are static: a TTL there would make a cache re-fetch a grid that
+  // changes on a multi-year cycle.
+  for (const id of ['depth-gebco', 'depth-noaa-enc', 'depth-bluetopo', 'seascape-dem', 'basemap']) {
+    assert.equal(src(id).maxAgeSeconds, undefined, `${id} must not carry a TTL`)
+  }
 })
 
 test('every catalog source carries a positive safe-integer fallbackTileBytes', () => {
