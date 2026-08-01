@@ -4,6 +4,7 @@ import { DEFAULT_TILE_BYTES_BY_MODE, estimateBytes } from '../src/estimate.js'
 import { tileCountInBbox } from '../src/mercator.js'
 import { chartSourceById } from '../src/registry.js'
 import type { LngLatBbox } from '../src/types.js'
+import { makeSource } from './fixtures.js'
 
 const BBOX: LngLatBbox = [-1, -1, 1, 1]
 const SAN_FRANCISCO: LngLatBbox = [-122.5, 37.5, -122.0, 38.0]
@@ -68,6 +69,28 @@ test('estimateBytes counts a duplicated source id once', () => {
 
 test('estimateBytes fails closed for unknown source ids', () => {
   assert.throws(() => estimateBytes(['does-not-exist'], BBOX, [6, 6], {}), /unknown chart source/)
+})
+
+test('estimateBytes accepts a whole source, so a consumer can price one it defined itself', () => {
+  const custom = makeSource({ id: 'custom', fallbackTileBytes: 1_000 })
+  const tiles = tileCountInBbox(custom, BBOX, [6, 6])
+  assert.ok(tiles > 0)
+  assert.equal(estimateBytes([custom], BBOX, [6, 6], {}), tiles * 1_000)
+  // A measured average is keyed by the source's own id, the same as for a catalog entry.
+  assert.equal(estimateBytes([custom], BBOX, [6, 6], { custom: 7 }), tiles * 7)
+  // Ids and whole sources mix, and are still counted once each.
+  const both = estimateBytes([custom, 'seamark'], BBOX, [6, 6], {})
+  assert.equal(both, estimateBytes([custom], BBOX, [6, 6], {}) + estimateBytes(['seamark'], BBOX, [6, 6], {}))
+  assert.equal(estimateBytes([custom, custom, 'seamark', 'seamark'], BBOX, [6, 6], {}), both)
+})
+
+test('estimateBytes checks a supplied source before trusting it', () => {
+  // The id is checked first, because an unchecked one could name itself into the averages lookup,
+  // or into the dedupe set to suppress a real source that shares the id.
+  const invalid = makeSource({ id: 'Not A Valid Id' })
+  assert.throws(() => estimateBytes([invalid], BBOX, [6, 6], {}), /invalid source id/)
+  // The rest of the shape is still checked, by tileCountInBbox, before any tile is counted.
+  assert.throws(() => estimateBytes([makeSource({ maxzoom: -1 })], BBOX, [6, 6], {}), /maxzoom must be an integer/)
 })
 
 test('estimateBytes treats a global source (no bounds) as covering any non-empty bbox', () => {

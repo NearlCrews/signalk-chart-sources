@@ -101,6 +101,17 @@ test('arcgis normalizes trailing slashes before appending export', () => {
   assert.equal(url.pathname, '/MapServer/export')
 })
 
+test('wms normalizes trailing slashes the same way arcgis does', () => {
+  // One base must not yield two spellings of the same GetMap, which would split a proxy's cache.
+  assert.ok(wms.upstream.mode === 'wms')
+  const trailing = makeSource({
+    id: 's',
+    upstream: { ...wms.upstream, base: `https://w/wms${'/'.repeat(1_024)}` }
+  })
+  assert.equal(new URL(expandUpstreamUrl(trailing, 1, 0, 0)).pathname, '/wms')
+  assert.equal(expandUpstreamUrl(trailing, 1, 0, 0), expandUpstreamUrl(wms, 1, 0, 0))
+})
+
 test('an out-of-range tile coordinate throws', () => {
   assert.throws(() => expandUpstreamUrl(xyz, 1, 2, 0), RangeError) // x 2 >= 2^1
   assert.throws(() => expandUpstreamUrl(wms, 30, 0, 0), RangeError) // z above maxzoom

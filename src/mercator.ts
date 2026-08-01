@@ -1,4 +1,4 @@
-import type { ChartSource, LngLatBbox, MercatorBbox, TileEnumerationOptions, ZoomRange } from './types.js'
+import type { ChartSource, LngLatBbox, MercatorBbox, TileEnumerationOptions, ZoomRange, ZXY } from './types.js'
 import {
   assertFiniteNumber,
   assertLngLatBbox,
@@ -53,8 +53,6 @@ export function tileForLngLat(lng: number, lat: number, z: number): Readonly<{ x
     y: Math.min(max, Math.max(0, yf))
   }
 }
-
-export type ZXY = Readonly<{ z: number; x: number; y: number }>
 
 type TileRange = Readonly<{ z: number; x0: number; x1: number; y0: number; y1: number }>
 
