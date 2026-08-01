@@ -1,9 +1,11 @@
 # Migration guide
 
-## Unreleased
+## Migrating from 0.6.x to 0.7.0
 
-Twenty new sources, an optional `maxAgeSeconds` field, and stricter host validation. Consumers that
-only read the built-in catalog and pass valid inputs need no code changes, but three behaviors move.
+Twenty new sources, an optional `maxAgeSeconds` field, and stricter host validation. Existing
+`^0.6.x` dependency ranges do not select 0.7.0, so consumers can migrate and test deliberately.
+Consumers that only read the built-in catalog and pass valid inputs need no code changes, but three
+behaviors move.
 
 - Time-dynamic sources exist for the first time, and a cache must honor them. A source carrying
   `maxAgeSeconds` is stale after that many seconds and must not be pre-warmed: warming a weather
