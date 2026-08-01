@@ -7,12 +7,6 @@ export type LngLatBbox = readonly [west: number, south: number, east: number, no
 /** An EPSG:3857 box in meters as [minX, minY, maxX, maxY]. */
 export type MercatorBbox = readonly [minX: number, minY: number, maxX: number, maxY: number]
 
-/**
- * Backward-compatible geographic bbox name. New code should prefer LngLatBbox so degree and meter
- * boxes remain visibly distinct at API boundaries.
- */
-export type Bbox = LngLatBbox
-
 /** An inclusive [minzoom, maxzoom] pair. */
 export type ZoomRange = readonly [minzoom: number, maxzoom: number]
 
@@ -56,9 +50,10 @@ export interface ChartSource {
   /** Geographic display envelope. Omitted means worldwide. May cross the antimeridian. */
   readonly bounds?: LngLatBbox
   /**
-   * Optional disjoint warming and estimate coverage. This is preferred over bounds for services
-   * whose useful coverage cannot be represented by one rectangle. Entries may cross the
-   * antimeridian and are deduplicated by tile helpers when they overlap.
+   * Optional warming and estimate coverage, preferred over bounds for a service whose useful
+   * coverage cannot be represented by one rectangle. Entries may cross the antimeridian and need not
+   * be disjoint: tile helpers deduplicate overlapping regions, so a tile covered by several entries
+   * is still counted and enumerated once.
    */
   readonly coverage?: readonly LngLatBbox[]
   /** Conservative first-download estimate used until a measured average exists. */

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { EXPECTED_EXPORTS } from '../scripts/expected-exports.mjs'
 import { expandUpstreamUrl } from '../src/expand.js'
-import { tileCountInBbox } from '../src/mercator.js'
-import { CHART_SOURCES, chartSourceById } from '../src/registry.js'
-import type { Bbox, ChartSource } from '../src/types.js'
+import { assertGroupCoherence, CHART_SOURCES, chartSourceById } from '../src/registry.js'
+import type { ChartSource, LngLatBbox } from '../src/types.js'
 
 // A typo'd id must fail the test, not silently return undefined, so lookups assert.
 const src = (id: string): ChartSource => {
@@ -12,12 +12,19 @@ const src = (id: string): ChartSource => {
   return s
 }
 
-const inBox = (b: Bbox | undefined, lng: number, lat: number): boolean =>
+const inBox = (b: LngLatBbox | undefined, lng: number, lat: number): boolean =>
   b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
 
 test('every source id is unique', () => {
   const ids = CHART_SOURCES.map((s) => s.id)
   assert.equal(new Set(ids).size, ids.length)
+})
+
+test('the public barrel exports exactly the documented runtime surface', async () => {
+  // The package entry point is the contract. This checks the source tree in process;
+  // scripts/package-smoke.mjs checks the packed tarball against the same shared list.
+  const api: Record<string, unknown> = await import('../src/index.js')
+  assert.deepEqual(Object.keys(api).sort(), [...EXPECTED_EXPORTS].sort())
 })
 
 test('every non-style source expands to an absolute https URL at its minzoom', () => {
@@ -48,7 +55,20 @@ test('key sources pin their transcribed upstream data (drift guard)', () => {
   assert.equal(enc.upstream.layers, '0,1,2,3,4,5,6,7,10')
   const bluetopo = src('depth-bluetopo')
   assert.equal(bluetopo.tileSize, 512)
-  assert.equal(bluetopo.upstream.mode, 'wmts')
+  assert.ok(bluetopo.upstream.mode === 'wmts')
+  // Pin the whole template. Expanding it only at tile 0/0 elsewhere would not notice TILEROW and
+  // TILECOL being swapped, nor a changed layer, matrix set, or format.
+  assert.equal(
+    bluetopo.upstream.urlTemplate,
+    'https://nowcoast.noaa.gov/geoserver/gwc/service/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile' +
+      '&LAYER=bluetopo:bathymetry&STYLE=&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}' +
+      '&TILECOL={x}&FORMAT=image/png8'
+  )
+  // Expand at a tile whose x and y differ so a swap cannot pass.
+  const expanded = new URL(expandUpstreamUrl(bluetopo, 5, 9, 20))
+  assert.equal(expanded.searchParams.get('TILECOL'), '9')
+  assert.equal(expanded.searchParams.get('TILEROW'), '20')
+  assert.equal(expanded.searchParams.get('TILEMATRIX'), 'EPSG:3857:5')
   const seamark = src('seamark')
   assert.ok(seamark.upstream.mode === 'xyz')
   assert.equal(seamark.upstream.urlTemplate, 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png')
@@ -118,18 +138,20 @@ test('every bounded source has a finite, non-degenerate west, south, east, north
   }
 })
 
-test('sources sharing a group id share one group title and one attribution', () => {
-  const members = new Map<string, ChartSource[]>()
-  for (const s of CHART_SOURCES) {
-    if (!s.group) continue
-    const list = members.get(s.group.id) ?? []
-    list.push(s)
-    members.set(s.group.id, list)
-  }
-  for (const [id, group] of members) {
-    assert.equal(new Set(group.map((m) => m.group?.title)).size, 1, `group ${id} must carry one title`)
-    assert.equal(new Set(group.map((m) => m.attribution)).size, 1, `group ${id} must share one attribution`)
-  }
+test('group coherence is enforced when the catalog is built, not only by this suite', () => {
+  // A consumer importing the catalog must not be able to receive a group whose members disagree,
+  // so the invariant belongs to defineCatalog rather than to a test a consumer never runs.
+  const source = src('depth-emodnet')
+  const group = source.group
+  assert.ok(group)
+  assert.throws(
+    () => assertGroupCoherence([source, { ...source, id: 'other', group: { ...group, title: 'Different' } }]),
+    /two titles/
+  )
+  assert.throws(
+    () => assertGroupCoherence([source, { ...source, id: 'other', attribution: 'Different attribution' }]),
+    /disagree on attribution/
+  )
 })
 
 test('BlueTopo bounds pin the US extent from the service capabilities (drift guard)', () => {
@@ -144,10 +166,26 @@ test('NOAA ENC coverage pins the chart regions from the ENC product catalog (dri
   const enc = src('depth-noaa-enc')
   const quality = src('depth-noaa-enc-quality')
   assert.ok(enc.coverage, 'depth-noaa-enc must carry coverage')
-  assert.equal(enc.coverage.length, 14)
   assert.deepEqual(quality.coverage, enc.coverage)
+  // Pin every region, not just the count and the first box. A silently edited box in the middle of
+  // the list would otherwise change what gets warmed with nothing to catch it.
+  assert.deepEqual(enc.coverage, [
+    [-100.8, 15.6, -64.3, 52.8],
+    [-180, 30.5, -113.7, 81.6],
+    [165.6, 48, 180, 68],
+    [-179.3, 5, -154, 30],
+    [-178.8, 15.6, -153.6, 28.8],
+    [-166.4, 18, -150, 30],
+    [-180, 18.7, -116.3, 38.4],
+    [-154, 15, -116.5, 18.8],
+    [-180, -7.5, -154.3, 18.8],
+    [-173.8, -17.6, -165.2, -10],
+    [131, 0, 173.6, 26],
+    [-80.1, 8.7, -78, 9.9],
+    [-64.5, -64.9, -63.9, -64.6],
+    [-40, -78.4, -30, -75]
+  ])
   // The first region is the densest one, so the upstream monitor samples a representative US tile.
-  assert.deepEqual(enc.coverage[0], [-100.8, 15.6, -64.3, 52.8])
   const covered = (lng: number, lat: number): boolean => (enc.coverage ?? []).some((b) => inBox(b, lng, lat))
   assert.equal(covered(-76.2, 37.5), true, 'Chesapeake Bay must be covered')
   assert.equal(covered(144.8, 13.5), true, 'Guam must be covered')
@@ -155,12 +193,6 @@ test('NOAA ENC coverage pins the chart regions from the ENC product catalog (dri
   assert.equal(covered(-146, 61), true, 'Prince William Sound must be covered')
   assert.equal(covered(0, 50), false, 'the English Channel must not be covered')
   assert.equal(covered(-15, -30), false, 'the South Atlantic must not be covered')
-})
-
-test('NOAA ENC counts and estimates track chart coverage, not the global envelope', () => {
-  const enc = src('depth-noaa-enc')
-  assert.equal(tileCountInBbox(enc, [-5, 48, 5, 52], [0, 10]), 0)
-  assert.ok(tileCountInBbox(enc, [-77, 36, -75, 38], [8, 8]) > 0)
 })
 
 test('every catalog source carries a positive safe-integer fallbackTileBytes', () => {

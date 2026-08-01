@@ -9,8 +9,10 @@ import {
   webMercatorTileBounds
 } from '../src/mercator.js'
 import { CHART_SOURCES } from '../src/registry.js'
-import type { Bbox, ZoomRange } from '../src/types.js'
+import type { ChartSource, LngLatBbox, ZoomRange } from '../src/types.js'
 import { makeSource } from './fixtures.js'
+
+const WORLD: LngLatBbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
 
 test('tileForLngLat returns 0,0 at zoom 0', () => {
   assert.deepEqual(tileForLngLat(0, 0, 0), { x: 0, y: 0 })
@@ -73,7 +75,7 @@ test('tilesInBbox yields the exact z/x/y tiles, not just the right count', () =>
 })
 
 test('tilesInBbox enumerates exactly tileCountInBbox tiles', () => {
-  const bbox: Bbox = [-10, 40, 10, 55]
+  const bbox: LngLatBbox = [-10, 40, 10, 55]
   const range: ZoomRange = [4, 7]
   assert.equal(tilesInBbox(makeSource(), bbox, range).length, tileCountInBbox(makeSource(), bbox, range))
 })
@@ -88,7 +90,14 @@ test('the bbox clips to the source bounds', () => {
   const bounded = makeSource({ bounds: [0, 0, 5, 5] })
   const unbounded = makeSource()
   const range: ZoomRange = [6, 6]
-  assert.ok(tileCountInBbox(bounded, [-20, -20, 20, 20], range) < tileCountInBbox(unbounded, [-20, -20, 20, 20], range))
+  const request: LngLatBbox = [-20, -20, 20, 20]
+  const clipped = tilesInBbox(bounded, request, range)
+  assert.ok(clipped.length > 0, 'clipping must not empty the result')
+  assert.ok(clipped.length < tileCountInBbox(unbounded, request, range))
+  // Every returned tile must actually lie inside the declared bounds, which a count comparison alone
+  // would not catch if the clip kept the wrong rectangle.
+  const insideBounds = tilesInBbox(makeSource(), [0, 0, 5, 5], range)
+  assert.deepEqual(clipped, insideBounds)
 })
 
 test('an antimeridian-crossing box splits across the east and west edge without duplicates', () => {
@@ -121,6 +130,106 @@ test('bbox edges are inclusive for conservative warming at exact tile boundaries
   ])
 })
 
+test('boundary inclusivity is directional: the east and south edges take in the neighboring tile', () => {
+  // At z1 the tile boundaries are lng 0 and lat 0. Flooring always steps to the higher tile index,
+  // so a box whose east or south edge sits on a boundary reaches the far tile, while one whose west
+  // or north edge sits there does not. Pinned because the behavior reads as symmetric and is not.
+  const axis = (bbox: LngLatBbox, key: 'x' | 'y'): number[] =>
+    [...new Set(tilesInBbox(makeSource(), bbox, [1, 1]).map((tile) => tile[key]))].sort()
+
+  assert.deepEqual(axis([-10, -10, 0, 10], 'x'), [0, 1], 'an east edge on lng 0 includes the eastern tile')
+  assert.deepEqual(axis([0, -10, 10, 10], 'x'), [1], 'a west edge on lng 0 excludes the western tile')
+  assert.deepEqual(axis([-10, 0, 10, 10], 'y'), [0, 1], 'a south edge on lat 0 includes the southern tile')
+  assert.deepEqual(axis([-10, -10, 10, 0], 'y'), [1], 'a north edge on lat 0 excludes the northern tile')
+})
+
+test('a zero-width box is degenerate rather than a full antimeridian wrap', () => {
+  // west === east has no longitude span. Reading it through the west > east wrap arm would turn a
+  // caller's degenerate request into worldwide coverage.
+  assert.throws(() => tileCountInBbox(makeSource(), [10, 0, 10, 10], [2, 2]), /non-zero area/)
+  assert.throws(() => tilesInBbox(makeSource(), [-45, -5, -45, 5], [3, 3]), /non-zero area/)
+})
+
+test('maxTiles is validated at call time, before any counting work', () => {
+  for (const maxTiles of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => tilesInBbox(makeSource(), [-1, -1, 1, 1], [1, 1], { maxTiles }), /maxTiles must be a positive/)
+  }
+  // A box whose count would overflow must still report the unusable maxTiles, not the overflow.
+  assert.throws(() => tilesInBbox(makeSource(), WORLD, [30, 30], { maxTiles: -1 }), /maxTiles must be a positive/)
+})
+
+test('iterateTilesInBbox rejects bad input when it is called, not when it is first advanced', () => {
+  // A caller that builds an iterator and abandons it must still get the rejection, so the fail-closed
+  // contract does not depend on the consumer choosing to iterate.
+  const invalid = { ...makeSource(), id: 'NOT A VALID ID' } as unknown as ChartSource
+  assert.throws(() => iterateTilesInBbox(invalid, [-1, -1, 1, 1], [1, 1]), TypeError)
+  assert.throws(() => iterateTilesInBbox(makeSource(), [5, 5, 5, 5], [1, 1]), /non-zero area/)
+  assert.throws(() => iterateTilesInBbox(makeSource(), [-1, -1, 1, 1], [1, 1], { maxTiles: 0 }), RangeError)
+})
+
+test('coverage regions separated by a gap keep the gap instead of merging across it', () => {
+  // Exercises the split arm of the y-interval merge. Without it the two bands would fuse and every
+  // tile in the empty latitude gap would be warmed.
+  const source = makeSource({
+    coverage: [
+      [0, 0, 10, 5],
+      [0, 40, 10, 50]
+    ]
+  })
+  const tiles = tilesInBbox(source, [-5, -5, 15, 55], [5, 5])
+  assert.ok(tiles.length > 0)
+  const rows = [...new Set(tiles.map((tile) => tile.y))].sort((a, b) => a - b)
+  const gaps = rows.filter((row, index) => index > 0 && row !== (rows[index - 1] ?? row) + 1)
+  assert.equal(gaps.length, 1, `expected one gap between the two bands, got rows ${rows.join(',')}`)
+  // The southern band and the northern band must both be present, and nothing between them.
+  const southern = tilesInBbox(makeSource({ coverage: [[0, 0, 10, 5]] }), [-5, -5, 15, 55], [5, 5])
+  const northern = tilesInBbox(makeSource({ coverage: [[0, 40, 10, 50]] }), [-5, -5, 15, 55], [5, 5])
+  assert.equal(tiles.length, southern.length + northern.length)
+})
+
+test('a tile total beyond the safe integer limit is rejected rather than silently rounded', () => {
+  // 2^30 by 2^30 tiles is 2^60, far past Number.MAX_SAFE_INTEGER, so the sum loses precision.
+  assert.throws(() => tileCountInBbox(makeSource({ maxzoom: 30 }), WORLD, [30, 30]), /safe integer limit/)
+  assert.throws(() => tileCountInBbox(makeSource({ maxzoom: 30 }), WORLD, [0, 30]), /safe integer limit/)
+})
+
+test('zoom validation covers the ceiling, the type, and the range shape', () => {
+  const source = makeSource()
+  const bbox: LngLatBbox = [-1, -1, 1, 1]
+  assert.throws(() => tileCountInBbox(source, bbox, [0, 31]), /between 0 and 30/)
+  assert.throws(() => tileForLngLat(0, 0, 31), /between 0 and 30/)
+  assert.throws(() => tileCountInBbox(source, bbox, ['0', 1] as unknown as ZoomRange), /between 0 and 30/)
+  assert.throws(() => tileCountInBbox(source, bbox, [0] as unknown as ZoomRange), /exactly two values/)
+  assert.throws(() => tileCountInBbox(source, bbox, [0, 1, 2] as unknown as ZoomRange), /exactly two values/)
+  assert.throws(() => tileCountInBbox(source, bbox, Array(2) as unknown as ZoomRange), /exactly two values/)
+})
+
+test('overlapping coverage regions stay deduplicated across a multi-zoom range', () => {
+  // Exercises the disjoint-range merge with regions that genuinely overlap rather than abut.
+  const source = makeSource({
+    coverage: [
+      [-10, -10, 10, 10],
+      [0, 0, 20, 20],
+      [-5, -5, 5, 25]
+    ]
+  })
+  const request: LngLatBbox = [-30, -30, 30, 30]
+  const range: ZoomRange = [3, 7]
+  const tiles = tilesInBbox(source, request, range, { maxTiles: 200_000 })
+  const keys = new Set(tiles.map(({ z, x, y }) => `${z}/${x}/${y}`))
+  assert.equal(keys.size, tiles.length, 'the merge must not emit a tile twice')
+  assert.equal(tileCountInBbox(source, request, range), tiles.length, 'the count must match the enumeration')
+
+  // The union of the three regions, rasterized independently, is the ground truth.
+  const expected = new Set<string>()
+  for (const box of source.coverage ?? []) {
+    for (const tile of tilesInBbox(makeSource({ coverage: [box] }), request, range, { maxTiles: 200_000 })) {
+      expected.add(`${tile.z}/${tile.x}/${tile.y}`)
+    }
+  }
+  assert.deepEqual([...keys].sort(), [...expected].sort())
+})
+
 test('tileCountInBbox clamps a vector source to vectorMaxzoom even when asked for a higher zoom', () => {
   const basemap = CHART_SOURCES.find((s) => s.id === 'basemap')
   assert.ok(basemap, 'basemap source must exist')
@@ -140,9 +249,8 @@ test('tile math rejects non-finite coordinates and invalid zooms', () => {
 })
 
 test('enumeration fails before allocating an unsafe array and supports lazy iteration', () => {
-  const world: Bbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
-  assert.equal(tileCountInBbox(makeSource(), world, [16, 16]), 4_294_967_296)
-  assert.throws(() => tilesInBbox(makeSource(), world, [16, 16]), /exceeds maxTiles/)
+  assert.equal(tileCountInBbox(makeSource(), WORLD, [16, 16]), 4_294_967_296)
+  assert.throws(() => tilesInBbox(makeSource(), WORLD, [16, 16]), /exceeds maxTiles/)
   assert.deepEqual(
     [...iterateTilesInBbox(makeSource(), [-10, -10, 10, 10], [1, 1], { maxTiles: 10 })],
     tilesInBbox(makeSource(), [-10, -10, 10, 10], [1, 1])
@@ -170,7 +278,7 @@ test('deterministic bbox samples preserve count, uniqueness, and coordinate inva
   for (let sample = 0; sample < 100; sample++) {
     const west = -179 + random() * 340
     const south = -80 + random() * 140
-    const bbox: Bbox = [
+    const bbox: LngLatBbox = [
       west,
       south,
       Math.min(179, west + 0.1 + random() * 10),
