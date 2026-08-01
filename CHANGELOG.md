@@ -9,6 +9,56 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add twenty sources. A dark basemap (OpenFreeMap Dark) for night use. Seven NOAA nowCOAST weather
+  and ocean overlays: base reflectivity radar mosaics for the lower 48, Alaska, Hawaii, and the
+  Caribbean, active tropical cyclones, NWS watches and warnings, and global sea surface temperature.
+  Two GEBCO facets, flat color elevation and measured-soundings-only. EMODnet depth contours. Four
+  seabed-infrastructure overlays from EMODnet Human Activities: power cables, telecom cables,
+  pipelines, and wind farms. Monthly AIS vessel density. Three more Marine Regions jurisdiction
+  layers, the 24 nm contiguous zone, the high seas, and IHO sea areas, plus UNESCO World Heritage
+  marine sites, which is the catalog's first worldwide protected-area layer.
+- Add an optional `maxAgeSeconds` to `ChartSource`, declaring how long a fetched tile stays usable. A
+  cache must treat an older tile as expired and must not warm the source ahead of time, because a
+  stored weather frame is wrong before anyone sails into it. Only the weather and ocean sources carry
+  it, and each also caps its zoom well short of the chart-display ceiling, since a source that
+  re-fetches on a timer pays its tile count over and over.
+- Accept whole `ChartSource` values as well as catalog ids in `estimateBytes`, so a consumer can
+  price a source it defined itself. A supplied source is checked before its id is read.
+- Add an optional `tileJsonUrl` to the `xyz` upstream, naming the TileJSON a service publishes for a
+  tileset. A tile template carries no metadata, so this is what lets the monitor check a transcribed
+  attribution against what the service currently serves.
+- Compare every XYZ source that declares a TileJSON against it on each upstream monitor run, and
+  compare every WMS source's `bounds` against the envelope its own layer advertises. The Seascape
+  attribution drift below went unnoticed because nothing checked it, and nine of the envelopes added
+  in this release would have had the same gap. The bounds check found a real one immediately: the
+  EMODnet quality and contour facets reach less far than the bathymetry whose envelope they had
+  been given.
+
+### Changed
+
+- Reject ports, IP address literals, and loopback names in every URL field rather than only in a
+  style `allowedHosts` entry. Address literals are rejected wholesale rather than range by range,
+  which leaves the private-range table in the one place that can act on it. A hostname still has to
+  be checked against the address it resolves to, which only the consuming server can do.
+- Replace the `mpa-noaa` bounding box with fifteen coverage regions derived from the MPA inventory's
+  own geometry. The previous box excluded Guam, the Northern Mariana Islands, American Samoa, Wake
+  Island, and the Pacific Remote Islands outright, while enumerating about 42 percent more tiles
+  than the derived regions do.
+- Replace the EMODnet bathymetry bounding box with seven coverage regions derived by sampling the
+  live digital terrain model. The previous box was the 2016-era extent and clipped the Azores,
+  Madeira, the Canaries, and the Caribbean overseas territories; the service's own advertised box is
+  the tiling grid rather than the data, and warming it whole would cover the Sahara.
+- Give the two EMODnet Human Activities protected-area overlays their own advertised envelopes
+  instead of sharing the bathymetry's, which fit neither.
+- Transcribe the shortened Seascape attribution the service now publishes, in both the raster and
+  vector sources.
+- Strip trailing slashes from a WMS `base` when expanding a tile URL, matching what ArcGIS already
+  did, so one base cannot produce two spellings of the same request.
+- Move the `ZXY` type to `types.ts` with the other domain types. It is still exported from
+  `mercator.ts` and from the package entry point.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added

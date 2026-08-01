@@ -1,5 +1,35 @@
 # Migration guide
 
+## Unreleased
+
+Twenty new sources, an optional `maxAgeSeconds` field, and stricter host validation. Consumers that
+only read the built-in catalog and pass valid inputs need no code changes, but three behaviors move.
+
+- Time-dynamic sources exist for the first time, and a cache must honor them. A source carrying
+  `maxAgeSeconds` is stale after that many seconds and must not be pre-warmed: warming a weather
+  radar fills a cache with frames that are wrong before anyone reads them. A consumer that stores
+  tiles has to read the field before it lists any of the `weather-*` or `ocean-*` sources. A
+  consumer that only renders can ignore it.
+- Consumer-supplied source URLs may no longer carry a port, an IP address literal, or a loopback
+  name, in any URL field rather than only in a style `allowedHosts` entry. A definition pointing at
+  `https://host:8443/...`, `https://127.0.0.1/...`, or `https://localhost/...` now throws. This is
+  the definition-time half of an SSRF policy; a server proxying these must still check the address a
+  hostname resolves to, which is the only place a rebind can be caught.
+- `depth-emodnet`, its two facets, and `mpa-noaa` now carry derived `coverage` regions, and their
+  `bounds` changed to the envelope of those regions. Tile counts and estimates for them change:
+  `mpa-noaa` drops about 42 percent while gaining Guam, the Northern Marianas, American Samoa, Wake,
+  and the Pacific Remote Islands, which its old box excluded outright. `mpa-emodnet` and
+  `mpa-natura2000` also pick up their own advertised envelopes instead of sharing the bathymetry's.
+- `estimateBytes` accepts whole `ChartSource` values alongside catalog ids, so a consumer can price a
+  source it defined itself. Passing ids keeps working unchanged.
+- An `xyz` upstream may carry `tileJsonUrl`. It is additive and optional; a consumer that renders
+  tiles can ignore it, and one that wants a MapLibre `url:` source can use it instead of `tiles:`.
+- The Seascape attribution is now the short form the service publishes today. A consumer displaying
+  its own copy of the long form is showing text upstream no longer serves.
+- `expandUpstreamUrl` strips trailing slashes from a WMS `base`, matching what it already did for
+  ArcGIS. A cache keyed on the exact request URL sees new keys for any WMS source whose base was
+  written with a trailing slash.
+
 ## Migrating from 0.5.x to 0.6.0
 
 Version 0.6.0 is a breaking pre-1.0 release. Existing `^0.5.x` dependency ranges do not select it,
