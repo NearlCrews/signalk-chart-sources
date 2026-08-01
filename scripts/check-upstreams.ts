@@ -204,12 +204,8 @@ async function discoverStyleHosts(styleUrl: string): Promise<Set<string>> {
     hosts.add(url.hostname.toLowerCase())
     if (visitedTileJson.has(url.href)) return
     visitedTileJson.add(url.href)
-    const { response, bytes } = await fetchBytes(url.href)
-    const finalUrl = checkedHttpsUrl(response.url)
+    const { json: tileJson, finalUrl } = await fetchJson(url.href, 'TileJSON')
     hosts.add(finalUrl.hostname.toLowerCase())
-    assert.match(response.headers.get('content-type') ?? '', /json/i, `${finalUrl} content type drifted`)
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    const tileJson = record(parsed, `${finalUrl} TileJSON`)
     for (const tile of strings(tileJson['tiles'])) {
       hosts.add(checkedHttpsUrl(tile, finalUrl.href).hostname.toLowerCase())
     }
@@ -220,12 +216,8 @@ async function discoverStyleHosts(styleUrl: string): Promise<Set<string>> {
     hosts.add(url.hostname.toLowerCase())
     if (visitedStyles.has(url.href)) return
     visitedStyles.add(url.href)
-    const { response, bytes } = await fetchBytes(url.href)
-    const finalUrl = checkedHttpsUrl(response.url)
+    const { json: style, finalUrl } = await fetchJson(url.href, 'style')
     hosts.add(finalUrl.hostname.toLowerCase())
-    assert.match(response.headers.get('content-type') ?? '', /json/i, `${finalUrl} content type drifted`)
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    const style = record(parsed, `${finalUrl} style`)
     const references = collectStyleReferences(style)
     for (const resource of references.resources) {
       hosts.add(checkedHttpsUrl(resource, finalUrl.href).hostname.toLowerCase())
@@ -258,6 +250,43 @@ async function checkSource(source: ChartSource): Promise<void> {
   console.log(`${source.id}: z${z}/${x}/${y}, HTTP ${response.status}, ${contentType}, ${bytes.byteLength} bytes`)
 }
 
+/**
+ * Fetch and parse a JSON document, re-checking the URL after redirects. Style documents, TileJSON,
+ * and the attribution check all need the same four steps, and the copy that skipped the redirect
+ * re-check is exactly the kind of drift one helper prevents.
+ */
+async function fetchJson(url: string, label: string): Promise<{ json: RecordValue; finalUrl: URL }> {
+  const { response, bytes } = await fetchBytes(url)
+  const finalUrl = checkedHttpsUrl(response.url)
+  assert.match(response.headers.get('content-type') ?? '', /json/i, `${finalUrl} content type drifted`)
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
+  return { json: record(parsed, `${finalUrl} ${label}`), finalUrl }
+}
+
+/**
+ * Check an XYZ source against the TileJSON its service publishes. A tile template carries no
+ * metadata of its own, so without this the transcribed attribution is checked by nothing: Seascape
+ * shortened its credit line and the monitor stayed green through it. The URL lives on the source
+ * rather than in a table here, because the catalog is the only place upstream data belongs.
+ */
+async function checkTileJsonAttribution(source: ChartSource, tileJsonUrl: string): Promise<void> {
+  const { json: tileJson } = await fetchJson(tileJsonUrl, 'TileJSON')
+  const published = requiredString(tileJson['attribution'], `${source.id} upstream attribution`)
+  // Exact, not a substring or a trim. The catalog's rule is that attribution is transcribed, and a
+  // service that rewords its credit line has changed what the webapp is obliged to display.
+  assert.equal(
+    source.attribution,
+    published,
+    `${source.id} attribution drifted from ${tileJsonUrl}. Transcribe the upstream value into ` +
+      `registry.ts and Binnacle's copy together.`
+  )
+  const maxzoom = tileJson['maxzoom']
+  if (maxzoom !== undefined) {
+    assert.equal(Number(maxzoom), source.maxzoom, `${source.id} maxzoom drifted from ${tileJsonUrl}`)
+  }
+  console.log(`${source.id}: attribution matches ${tileJsonUrl}`)
+}
+
 function collectWmsLayers(layer: unknown, layers = new Map<string, RecordValue>()): Map<string, RecordValue> {
   for (const entry of array(layer)) {
     if (!isRecord(entry)) continue
@@ -265,6 +294,19 @@ function collectWmsLayers(layer: unknown, layers = new Map<string, RecordValue>(
     collectWmsLayers(entry['Layer'], layers)
   }
   return layers
+}
+
+/** How far a catalog box may sit outside an advertised envelope before it counts as drift. */
+const ENVELOPE_TOLERANCE_DEGREES = 0.5
+
+/** The advertised geographic envelope of one WMS layer, or null when it declares none. */
+function layerEnvelope(layers: Map<string, RecordValue>, name: string): LngLatBbox | null {
+  const box = layers.get(name)?.['EX_GeographicBoundingBox']
+  if (!isRecord(box)) return null
+  const edges = ['westBoundLongitude', 'southBoundLatitude', 'eastBoundLongitude', 'northBoundLatitude'].map((edge) =>
+    Number(box[edge])
+  )
+  return edges.every(Number.isFinite) ? (edges as unknown as LngLatBbox) : null
 }
 
 function wmsRoot(document: RecordValue, label: string): RecordValue {
@@ -338,8 +380,33 @@ async function checkWmsCapabilities(sources: readonly ChartSource[]): Promise<vo
         assert.ok(gebco.attribution.includes(servedGrid), `GEBCO attribution does not match ${servedGrid}`)
       }
 
+      // Every WMS source that declares bounds is checked against the envelope its own layer
+      // advertises. Containment rather than equality, because some bounds are deliberately narrower:
+      // the EMODnet ones come from sampling where the grid actually has data, and the advertised box
+      // is the tiling extent. A catalog box reaching outside the advertised one is always wrong,
+      // either a bad transcription or an upstream that shrank.
+      for (const source of grouped) {
+        if (!source.bounds) continue
+        assert.equal(source.upstream.mode, 'wms')
+        const advertised = layerEnvelope(layers, source.upstream.layers.split(',')[0] ?? '')
+        if (!advertised) continue
+        const [west, south, east, north] = source.bounds
+        const [advWest, advSouth, advEast, advNorth] = advertised
+        assert.ok(
+          west >= advWest - ENVELOPE_TOLERANCE_DEGREES &&
+            south >= advSouth - ENVELOPE_TOLERANCE_DEGREES &&
+            east <= advEast + ENVELOPE_TOLERANCE_DEGREES &&
+            north <= advNorth + ENVELOPE_TOLERANCE_DEGREES,
+          `${source.id} bounds ${JSON.stringify(source.bounds)} reach outside the advertised ` +
+            `envelope ${JSON.stringify(advertised)}`
+        )
+      }
+
       const noaa = grouped.find((source) => source.id === 'depth-noaa-enc')
       if (noaa) {
+        // Exact for this one, on top of the containment check above. Its coverage regions were
+        // derived from the ENC product catalog against this envelope, so the envelope moving at all
+        // is the signal to re-derive them, not just a signal that the bounds are still legal.
         const box = record(rootLayer['EX_GeographicBoundingBox'], 'NOAA geographic envelope')
         const coordinate = (name: string): number => {
           const value = Number(requiredString(box[name], `NOAA ${name}`))
@@ -453,6 +520,11 @@ const checks: ReadonlyArray<readonly [string, Promise<void>]> = [
   ['WMS capabilities', checkWmsCapabilities(CHART_SOURCES)] as const,
   ...CHART_SOURCES.filter((source) => source.upstream.mode === 'wmts').map(
     (source) => [`${source.id} WMTS capabilities`, checkWmtsCapabilities(source)] as const
+  ),
+  ...CHART_SOURCES.flatMap((source) =>
+    source.upstream.mode === 'xyz' && source.upstream.tileJsonUrl !== undefined
+      ? [[`${source.id} attribution`, checkTileJsonAttribution(source, source.upstream.tileJsonUrl)] as const]
+      : []
   )
 ]
 
