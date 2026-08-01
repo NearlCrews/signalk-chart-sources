@@ -1,4 +1,4 @@
-import type { Bbox, ChartGroup, ChartSource } from './types.js'
+import type { ChartGroup, ChartSource, LngLatBbox } from './types.js'
 import { validateChartSource } from './validate.js'
 
 // Every shared upstream, transcribed from the Binnacle chartplotter source modules so the webapp render
@@ -15,22 +15,22 @@ const MARINE_REGIONS_WMS = 'https://geo.vliz.be/geoserver/MarineRegions/wms'
 const NOAA_MPA_SERVER =
   'https://gis.charttools.noaa.gov/arcgis/rest/services/survey_priorities2_national/MPA_Inventory_Separates/MapServer'
 
-const EMODNET_BOUNDS: Bbox = [-30.0, 25.0, 43.0, 84.0]
+const EMODNET_BOUNDS: LngLatBbox = [-30.0, 25.0, 43.0, 84.0]
 // The BlueTopo geographic extent from the service GetCapabilities (bluetopo:bathymetry): US waters
 // spanning longitude -138 to -64.198 (all western hemisphere, so all negative) and latitude 16.786 to
 // 59.55 north. The tuple is [minLng, minLat, maxLng, maxLat]; do not clip the longitudes to positive
 // values, which an earlier bounds error did and which drops the whole extent.
-const BLUETOPO_BOUNDS: Bbox = [-138.0, 16.786, -64.198, 59.55]
+const BLUETOPO_BOUNDS: LngLatBbox = [-138.0, 16.786, -64.198, 59.55]
 // The service-level geographic envelope reported by the current WMS 1.3.0 GetCapabilities. The
 // actual ENC coverage is sparse inside this box, so consumers should still expect transparent tiles.
-const NOAA_ENC_BOUNDS: Bbox = [-180, -78.333333, 180, 81.6]
-// Disjoint warming and estimate regions, derived 2026-07-27 from the NOAA ENC product catalog
+const NOAA_ENC_BOUNDS: LngLatBbox = [-180, -78.333333, 180, 81.6]
+// Warming and estimate regions, derived 2026-07-27 from the NOAA ENC product catalog
 // (https://www.charts.noaa.gov/ENCs/ENCProdCat.xml, issued 2026-07-25): the union of every active
 // cell footprint, clustered by region and rounded outward to 0.1 degree. The catalog extremes match
 // the service envelope above (Chukchi Plateau 81.6 north, Vahsel Bay -78.33 south), so re-derive
 // these boxes whenever the upstream monitor reports that envelope drifted. Harbor-scale detail is
 // sparse inside the larger boxes; only areas with no ENC cell at all are excluded.
-const NOAA_ENC_COVERAGE: readonly Bbox[] = [
+const NOAA_ENC_COVERAGE: readonly LngLatBbox[] = [
   // US East Coast, Gulf coast, Great Lakes, Puerto Rico, and the US Virgin Islands.
   [-100.8, 15.6, -64.3, 52.8],
   // US West Coast, Alaska, the eastern Aleutians, the Bering Sea, and the Arctic.
@@ -55,7 +55,7 @@ const NOAA_ENC_COVERAGE: readonly Bbox[] = [
   [-64.5, -64.9, -63.9, -64.6],
   [-40, -78.4, -30, -75]
 ]
-const NOAA_MPA_BOUNDS: Bbox = [-180, 15, -60, 75]
+const NOAA_MPA_BOUNDS: LngLatBbox = [-180, 15, -60, 75]
 
 // Attribution strings shared by more than one source, named so a correction cannot land on one copy
 // and miss the other.
@@ -68,8 +68,10 @@ const VLIZ_ATTR = 'Flanders Marine Institute (VLIZ), marineregions.org, CC-BY'
 // identical attribution fields on 2026-07-07 (mirrors Binnacle's own copy in
 // src/features/depth-charts/seascape-sources.ts; re-fetch and update both if Seascape's own
 // attribution text changes).
+// cspell:disable -- verbatim upstream attribution; never edit it to satisfy a dictionary
 const SEASCAPE_ATTR =
   '<a href="https://openwaters.io/charts/seascape#license">© Open Water Software, LLC</a>  | <a href="https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/ITCOGT">African Great Lakes Bathymetry (GLWNB-2020): Victoria, Albert, Edward, George</a> | <a href="https://www.ausseabed.gov.au/data/bathymetry">AusBathyTopo (Australia) 2024 250 m</a> | <a href="https://tanahair.indonesia.go.id/">BATNAS Batimetri Nasional (Indonesia, ~180 m)</a> | <a href="https://doi.org/10.1594/PANGAEA.855987">Bodensee (Lake Constance) bathymetry 3 m \u2014 IGKB Tiefenschärfe</a> | <a href="https://www.ncei.noaa.gov/products/coastal-relief-model">NOAA CUDEM 1/9 arc-second (NCEI Topobathy 2014)</a> | <a href="https://www.ncei.noaa.gov/products/coastal-relief-model">NOAA CUDEM 1/3 arc-second (NCEI Topobathy 2014)</a> | <a href="https://dataforsyningen.dk/data/4707">Danmarks Dybdemodel (DDM) 50 m</a> | <a href="https://emodnet.ec.europa.eu/en/bathymetry">EMODnet Bathymetry 2024 DTM</a> | <a href="https://www.ausseabed.gov.au/data/bathymetry">Great Barrier Reef Bathymetry 2020 30 m (gbr30)</a> | <a href="https://www.gebco.net/">GEBCO 2026 Grid (ice surface elevation)</a> | <a href="https://www.ncei.noaa.gov/products/great-lakes-bathymetry">NOAA NCEI Great Lakes Bathymetry (~90 m)</a> | <a href="https://open.canada.ca/data/en/dataset/335408ab-e7c9-581f-09fe-44487e1fd213">GSC Atlantic Bathymetric Compilation 100 m (Scotian Shelf + Newfoundland-Labrador)</a> | <a href="https://open.canada.ca/data/en/dataset/e6e11b99-f0cc-44f7-f5eb-3b995fb1637e">GSC Canada West Coast Topo-Bathymetric DEM 10 m (BC coast + Salish Sea)</a> | <a href="https://www.infomar.ie/">INFOMAR Bathymetry 10 m (merged inshore, Ireland)</a> | <a href="https://www.infomar.ie/">INFOMAR Bathymetry 25 m (merged shelf, Ireland)</a> | <a href="https://www.swisstopo.admin.ch/en/height-model-swissbathy3d">Lac Léman (Lake Geneva) Bathymetry \u2014 swissBATHY3D (~2 m)</a> | <a href="https://www.swisstopo.admin.ch/en/height-model-swissbathy3d">Lac de Neuchâtel Bathymetry \u2014 swissBATHY3D (~1 m)</a> | <a href="https://pubs.usgs.gov/dds/dds-55/pacmaps/lt_data.htm">Lake Tahoe Bathymetry (USGS DDS-55, 10 m)</a> | <a href="https://www.ncei.noaa.gov/products/estuarine-bathymetric-digital-elevation-models">NOAA NOS Estuarine Bathymetric DEMs (30 m)</a> | <a href="https://noaa-s102-pds.s3.amazonaws.com/README.html">NOAA S-102 Bathymetric Surface</a> | <a href="https://doi.org/10.1594/PANGAEA.880618">Southwest Indian Ocean Bathymetric Compilation (swIOBC) 250 m</a> | <a href="https://environment.data.gov.uk/dataset/77e6f743-d708-4909-a80f-9510b7dbaa16">SurfZone DEM 2019 (England intertidal/surf zone, 2 m)</a> | <a href="https://downloads.rijkswaterstaatdata.nl/">Vaklodingen 20 m (Dutch coastal waters, estuaries & main rivers)</a> | <a href="https://osmdata.openstreetmap.de/data/land-polygons.html">OpenStreetMap land polygons (ODbL)</a>'
+// cspell:enable
 
 // Group descriptors shared by a source and its facet, named so the group id cannot diverge between
 // the two and break the webapp's group aggregation.
@@ -86,10 +88,9 @@ function wms(
   layers: string,
   styles: string,
   extra: {
-    minzoom?: number
     maxzoom?: number
-    bounds?: Bbox
-    coverage?: readonly Bbox[]
+    bounds?: LngLatBbox
+    coverage?: readonly LngLatBbox[]
     attribution: string
     group?: ChartGroup
   }
@@ -98,7 +99,7 @@ function wms(
     id,
     title,
     tileSize: 256,
-    minzoom: extra.minzoom ?? 0,
+    minzoom: 0,
     maxzoom: extra.maxzoom ?? 18,
     ...(extra.bounds ? { bounds: extra.bounds } : {}),
     ...(extra.coverage ? { coverage: extra.coverage } : {}),
@@ -239,12 +240,40 @@ const SOURCES: ChartSource[] = [
 ]
 
 function deepFreeze<T>(value: T): T {
-  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+  const freezable = value !== null && (typeof value === 'object' || typeof value === 'function')
+  if (freezable && !Object.isFrozen(value)) {
     // Freeze before recursing so a cyclic reference cannot recurse forever.
     Object.freeze(value)
     for (const key of Reflect.ownKeys(value)) deepFreeze(Reflect.get(value, key))
   }
   return value
+}
+
+/**
+ * The webapp aggregates a source and its facets by group id, so members of one group must agree on
+ * the group title and the attribution they display. Enforced here rather than in a test alone, so a
+ * mismatch cannot reach a consumer that imports the catalog without running this suite.
+ */
+export function assertGroupCoherence(sources: readonly ChartSource[]): void {
+  const groups = new Map<string, { title: string; attribution: string; id: string }>()
+  for (const source of sources) {
+    if (!source.group) continue
+    const seen = groups.get(source.group.id)
+    if (!seen) {
+      groups.set(source.group.id, {
+        title: source.group.title,
+        attribution: source.attribution,
+        id: source.id
+      })
+      continue
+    }
+    if (seen.title !== source.group.title) {
+      throw new TypeError(`group ${source.group.id} has two titles: ${seen.title} and ${source.group.title}`)
+    }
+    if (seen.attribution !== source.attribution) {
+      throw new TypeError(`group ${source.group.id} members ${seen.id} and ${source.id} disagree on attribution`)
+    }
+  }
 }
 
 function defineCatalog(sources: ChartSource[]): readonly ChartSource[] {
@@ -254,6 +283,7 @@ function defineCatalog(sources: ChartSource[]): readonly ChartSource[] {
     if (ids.has(source.id)) throw new TypeError(`duplicate chart source id: ${source.id}`)
     ids.add(source.id)
   }
+  assertGroupCoherence(sources)
   return deepFreeze(sources)
 }
 

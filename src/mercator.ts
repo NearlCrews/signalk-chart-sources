@@ -5,6 +5,7 @@ import {
   assertTileCoordinate,
   assertZoom,
   assertZoomRange,
+  MAX_TILE_ZOOM,
   validateChartSource
 } from './validate.js'
 
@@ -25,10 +26,19 @@ export function webMercatorTileBounds(z: number, x: number, y: number): Mercator
 export const MAX_MERCATOR_LAT = 85.0511287798066
 
 /**
+ * The smallest edge magnitude a real tile can produce, which is the tile size at MAX_TILE_ZOOM. Any
+ * coordinate below this is floating-point residue from an edge that is mathematically zero, never a
+ * genuine tile boundary. Derived rather than written as a literal so raising MAX_TILE_ZOOM moves it.
+ */
+export const MIN_TILE_EDGE_METERS = (2 * ORIGIN) / 2 ** MAX_TILE_ZOOM
+
+/**
  * Return the integer XYZ tile containing a finite longitude-latitude point.
  * Latitude clamps to the Web Mercator limit, and finite longitude clamps to an edge tile.
+ *
+ * @throws {RangeError} When a coordinate is not finite or the zoom is out of range.
  */
-export function tileForLngLat(lng: number, lat: number, z: number): { x: number; y: number } {
+export function tileForLngLat(lng: number, lat: number, z: number): Readonly<{ x: number; y: number }> {
   assertFiniteNumber(lng, 'longitude')
   assertFiniteNumber(lat, 'latitude')
   assertZoom(z)
@@ -82,7 +92,9 @@ function clipBboxes(source: ChartSource, bbox: LngLatBbox): LngLatBbox[] {
   return intersections
 }
 
-function zoomBounds(source: ChartSource, zoomRange: ZoomRange): ZoomRange {
+// Not a ZoomRange: the clamped minimum can exceed the clamped maximum when a request falls entirely
+// outside the source's zooms, which coveredRanges reads as an empty result.
+function zoomBounds(source: ChartSource, zoomRange: ZoomRange): readonly [number, number] {
   assertZoomRange(zoomRange)
   const [zmin, zmax] = zoomRange
   return [Math.max(zmin, source.minzoom), Math.min(zmax, source.maxzoom, source.vectorMaxzoom ?? source.maxzoom)]
@@ -163,26 +175,16 @@ function enumerationLimit(options: TileEnumerationOptions): number {
 
 /**
  * Count distinct covered tiles without allocating the tile list. Antimeridian boxes and overlapping
- * coverage regions are split and deduplicated. Invalid inputs and unsafe totals throw RangeError.
+ * coverage regions are split and deduplicated.
+ *
+ * @throws {TypeError | RangeError} When the source definition is invalid, or when the box, the zoom
+ * range, or the resulting total is out of range.
  */
 export function tileCountInBbox(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): number {
   return countRanges(coveredRanges(source, bbox, zoomRange))
 }
 
-/**
- * Lazily enumerate distinct covered tiles. The full count is validated against maxTiles before the
- * first value is yielded.
- */
-export function* iterateTilesInBbox(
-  source: ChartSource,
-  bbox: LngLatBbox,
-  zoomRange: ZoomRange,
-  options: TileEnumerationOptions = {}
-): Generator<ZXY, void, undefined> {
-  const ranges = coveredRanges(source, bbox, zoomRange)
-  const total = countRanges(ranges)
-  const limit = enumerationLimit(options)
-  if (total > limit) throw new RangeError(`tile enumeration ${total} exceeds maxTiles ${limit}`)
+function* yieldRanges(ranges: readonly TileRange[]): Generator<ZXY, void, undefined> {
   for (const { z, x0, x1, y0, y1 } of ranges) {
     for (let x = x0; x <= x1; x++) {
       for (let y = y0; y <= y1; y++) yield { z, x, y }
@@ -190,7 +192,34 @@ export function* iterateTilesInBbox(
   }
 }
 
-/** Enumerate distinct covered tiles into an array, subject to a defensive maximum size. */
+/**
+ * Lazily enumerate distinct covered tiles. Inputs are validated and the total is checked against
+ * maxTiles when the call is made rather than when the generator is first advanced, so a rejected
+ * request fails closed even for a caller that never iterates.
+ *
+ * @throws {TypeError | RangeError} When the source definition is invalid, when the box, the zoom
+ * range, or maxTiles is out of range, or when the total exceeds maxTiles.
+ */
+export function iterateTilesInBbox(
+  source: ChartSource,
+  bbox: LngLatBbox,
+  zoomRange: ZoomRange,
+  options: TileEnumerationOptions = {}
+): Generator<ZXY, void, undefined> {
+  // Check the caller's own limit before doing any work, so an unusable maxTiles reports itself
+  // instead of being masked by an unsafe-total error from a large box.
+  const limit = enumerationLimit(options)
+  const ranges = coveredRanges(source, bbox, zoomRange)
+  const total = countRanges(ranges)
+  if (total > limit) throw new RangeError(`tile enumeration ${total} exceeds maxTiles ${limit}`)
+  return yieldRanges(ranges)
+}
+
+/**
+ * Enumerate distinct covered tiles into an array, subject to a defensive maximum size.
+ *
+ * @throws {TypeError | RangeError} Under the same conditions as iterateTilesInBbox.
+ */
 export function tilesInBbox(
   source: ChartSource,
   bbox: LngLatBbox,

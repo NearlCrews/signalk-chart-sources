@@ -2,9 +2,6 @@ import { tileCountInBbox } from './mercator.js'
 import { chartSourceById } from './registry.js'
 import type { LngLatBbox, UpstreamTemplate, ZoomRange } from './types.js'
 
-/** Conservative generic fallback when a source has no more specific first-download estimate. */
-export const DEFAULT_TILE_BYTES = 512_000
-
 /** Frozen first-download fallbacks keyed by upstream mode. A source-specific value takes priority. */
 export const DEFAULT_TILE_BYTES_BY_MODE: Readonly<Record<UpstreamTemplate['mode'], number>> = Object.freeze({
   xyz: 512_000,
@@ -42,10 +39,12 @@ export function estimateBytes(
     const source = chartSourceById(id)
     if (!source) throw new RangeError(`unknown chart source: ${id}`)
     const tiles = tileCountInBbox(source, bbox, zoomRange)
-    const measured = perSourceAvgBytes[id]
+    // Own properties only. Callers are told to treat cache statistics as untrusted, so an inherited
+    // or prototype-polluted entry must not silently stand in for a measured average.
+    const measured = Object.hasOwn(perSourceAvgBytes, id) ? perSourceAvgBytes[id] : undefined
     const avg =
       measured === undefined
-        ? (source.fallbackTileBytes ?? DEFAULT_TILE_BYTES_BY_MODE[source.upstream.mode] ?? DEFAULT_TILE_BYTES)
+        ? (source.fallbackTileBytes ?? DEFAULT_TILE_BYTES_BY_MODE[source.upstream.mode])
         : validatedAverage(id, measured)
     const sourceTotal = tiles * avg
     if (!Number.isSafeInteger(sourceTotal) || !Number.isSafeInteger(total + sourceTotal)) {
