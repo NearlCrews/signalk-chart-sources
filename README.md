@@ -236,9 +236,9 @@ metadata. It parses configured WMS layers, styles, formats, CRS support, WMTS ma
 the complete transitive style and TileJSON host graph. Verify the upstream service before changing
 catalog data.
 
-## Unreleased changes
+## Migrating to 0.7.0
 
-Not yet published. Three behaviors move for consumers:
+Three behaviors move for consumers:
 
 - Sources may carry `maxAgeSeconds`. A cache must expire those tiles and must never pre-warm them.
   Only the weather and ocean sources carry it.
