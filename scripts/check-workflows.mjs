@@ -7,6 +7,12 @@ const workflows = [
   '.github/workflows/npm-publish.yml',
   '.github/workflows/upstream-monitor.yml'
 ]
+// Job-level permission escalations, keyed by "<workflow>#<job>". Anything absent here must run with
+// the read-only workflow default.
+const allowedJobPermissions = new Map([
+  ['.github/workflows/npm-publish.yml#publish', { 'id-token': 'write', contents: 'read' }],
+  ['.github/workflows/upstream-monitor.yml#track', { contents: 'read', issues: 'write' }]
+])
 const expectedActions = new Map([
   ['actions/checkout', '9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0'],
   ['actions/setup-node', '820762786026740c76f36085b0efc47a31fe5020'],
@@ -30,17 +36,41 @@ for (const path of workflows) {
     const reference = match[1]
     assert.ok(reference, `${path} contains an empty action reference`)
     if (reference.startsWith('./')) continue
-    const action = reference.split('@')[0]
-    const sha = reference.split('@')[1]
+    const [action, sha] = reference.split('@')
+    // Check the pin and the allowlist separately. Comparing only against the map lets an unpinned
+    // reference to an unreviewed action pass, because both sides come back undefined.
+    assert.match(sha ?? '', /^[0-9a-f]{40}$/, `${path} must pin ${action} to a full commit SHA`)
+    assert.ok(expectedActions.has(action), `${path} uses an unreviewed action: ${action}`)
     assert.equal(sha, expectedActions.get(action), `${path} must use the reviewed ${action} SHA`)
   }
 
-  const lines = source.split('\n')
-  lines.forEach((line, index) => {
-    if (!line.includes('uses: actions/checkout@')) return
-    const block = lines.slice(index, index + 8).join('\n')
-    assert.match(block, /persist-credentials:\s*false/, `${path}:${index + 1} must disable checkout credentials`)
-  })
+  // Every job that widens permissions beyond the read-only default must be listed here, so a new
+  // write scope has to be reviewed rather than merely declared.
+  const jobs = object(workflow.jobs, `${path} jobs`)
+  for (const [name, job] of Object.entries(jobs)) {
+    const scopes = object(job, `${path} job ${name}`).permissions
+    if (scopes === undefined) continue
+    const expected = allowedJobPermissions.get(`${path}#${name}`)
+    assert.ok(expected, `${path} job ${name} declares unreviewed permissions: ${JSON.stringify(scopes)}`)
+    assert.deepEqual(scopes, expected, `${path} job ${name} must keep its reviewed permissions`)
+  }
+
+  // Read the steps structurally rather than slicing a window of text around each checkout line. A
+  // textual window has to guess where the step ends, and guessing long lets a later step's setting
+  // satisfy an earlier checkout that never had one.
+  for (const [name, job] of Object.entries(jobs)) {
+    const steps = object(job, `${path} job ${name}`).steps ?? []
+    for (const step of steps) {
+      const uses = object(step, `${path} job ${name} step`).uses
+      if (typeof uses !== 'string' || !uses.startsWith('actions/checkout@')) continue
+      const options = step.with
+      assert.equal(
+        options && typeof options === 'object' ? options['persist-credentials'] : undefined,
+        false,
+        `${path} job ${name} must disable checkout credentials`
+      )
+    }
+  }
 }
 
 const ci = readFileSync('.github/workflows/ci.yml', 'utf8')

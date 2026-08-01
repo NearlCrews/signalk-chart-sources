@@ -50,7 +50,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [[ "$BASE_SHA" =~ ^0+$ ]]; then
+          # A force-pushed or pruned base commit is no longer in the fetched history, so fall back to
+          # checking the head commit alone rather than failing the lane with "bad object".
+          if [[ "$BASE_SHA" =~ ^0*$ ]] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
             git diff-tree --check --root "$HEAD_SHA"
           else
             git diff --check "$BASE_SHA...$HEAD_SHA"

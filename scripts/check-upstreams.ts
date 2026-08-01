@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict'
 import { XMLParser } from 'fast-xml-parser'
-import { CHART_SOURCES, chartSourceById, expandUpstreamUrl, tileForLngLat } from '../src/index.js'
-import type { ChartSource, LngLatBbox } from '../src/types.js'
+import {
+  CHART_SOURCES,
+  type ChartSource,
+  chartSourceById,
+  expandUpstreamUrl,
+  type LngLatBbox,
+  tileForLngLat,
+  webMercatorTileBounds
+} from '../src/index.js'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 const MAX_FETCH_ATTEMPTS = 2
+/** How far a published WMTS matrix corner may sit from the projection origin before it is drift. */
+const ORIGIN_TOLERANCE_METERS = 1
 const USER_AGENT = 'signalk-chart-sources-upstream-monitor/1.0'
 const XML = new XMLParser({
   ignoreAttributes: false,
@@ -70,20 +79,27 @@ async function fetchBytesOnce(url: string): Promise<{ response: Response; bytes:
   })
   assert.ok(response.ok, `${url} returned HTTP ${response.status}`)
   checkedHttpsUrl(response.url)
-  const declaredLength = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declaredLength)) {
-    assert.ok(declaredLength <= MAX_RESPONSE_BYTES, `${url} declares an oversized response`)
+  // Number(null) is 0, which is finite, so testing the converted value alone would silently pass
+  // every response that omits the header.
+  const declaredLength = response.headers.get('content-length')
+  if (declaredLength !== null && Number.isFinite(Number(declaredLength))) {
+    assert.ok(Number(declaredLength) <= MAX_RESPONSE_BYTES, `${url} declares an oversized response`)
   }
   assert.ok(response.body, `${url} returned no response body`)
   const chunks: Uint8Array[] = []
   let byteLength = 0
   const reader = response.body.getReader()
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    byteLength += value.byteLength
-    assert.ok(byteLength <= MAX_RESPONSE_BYTES, `${url} exceeded the response limit`)
-    chunks.push(value)
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      byteLength += value.byteLength
+      assert.ok(byteLength <= MAX_RESPONSE_BYTES, `${url} exceeded the response limit`)
+      chunks.push(value)
+    }
+  } finally {
+    // Release the socket when the cap trips or a read fails, instead of leaving the body dangling.
+    await reader.cancel().catch(() => {})
   }
   const bytes = new Uint8Array(byteLength)
   let offset = 0
@@ -155,7 +171,12 @@ function collectStyleReferences(style: RecordValue): {
   const resources: string[] = []
   const tileJson: string[] = []
   const imports: string[] = []
+  // sprite is a string in the classic form and an array of {id, url} since the v5 style spec, so a
+  // string-only read would silently miss a whole host.
   if (typeof style['sprite'] === 'string') resources.push(style['sprite'])
+  for (const sprite of array(style['sprite'])) {
+    if (isRecord(sprite) && typeof sprite['url'] === 'string') resources.push(sprite['url'])
+  }
   if (typeof style['glyphs'] === 'string') resources.push(style['glyphs'])
 
   for (const imported of array(style['imports'])) {
@@ -165,6 +186,8 @@ function collectStyleReferences(style: RecordValue): {
     for (const value of Object.values(style['sources'])) {
       if (!isRecord(value)) continue
       if (typeof value['url'] === 'string') tileJson.push(value['url'])
+      // A geojson source names its data by URL, which is another host the allowlist must cover.
+      if (typeof value['data'] === 'string') resources.push(value['data'])
       resources.push(...strings(value['tiles']))
     }
   }
@@ -287,14 +310,24 @@ async function checkWmsCapabilities(sources: readonly ChartSource[]): Promise<vo
           assert.ok(configured, `${source.id} layer ${name} is unavailable`)
           return configured
         })
-        const requestedStyles = source.upstream.styles.split(',').filter(Boolean)
-        for (const style of requestedStyles) {
-          const availableStyles = configuredLayers
-            .flatMap((layer) => array(layer['Style']))
-            .filter(isRecord)
-            .map((entry) => entry['Name'])
-            .filter((name): name is string => typeof name === 'string')
-          assert.ok(availableStyles.includes(style), `${source.id} style ${style} is unavailable`)
+        // STYLES pairs with LAYERS by position, so a style must be offered by the layer it is
+        // requested for. Searching every layer's styles would pass a request the server rejects.
+        if (source.upstream.styles !== '') {
+          // The list lengths already agree: validateChartSource enforces the pairing when the
+          // catalog is built, so this only has to check availability against the live capabilities.
+          const requestedStyles = source.upstream.styles.split(',')
+          requestedStyles.forEach((style, index) => {
+            if (style === '') return
+            const layer = configuredLayers[index]
+            const availableStyles = array(layer?.['Style'])
+              .filter(isRecord)
+              .map((entry) => entry['Name'])
+              .filter((name): name is string => typeof name === 'string')
+            assert.ok(
+              availableStyles.includes(style),
+              `${source.id} style ${style} is unavailable on layer ${requestedLayers[index]}`
+            )
+          })
         }
       }
 
@@ -395,14 +428,55 @@ async function checkWmtsCapabilities(source: ChartSource): Promise<void> {
     assert.equal(Number(matrix['TileHeight']), source.tileSize, `${identifier} height drifted`)
     assert.equal(Number(matrix['MatrixWidth']), 2 ** z, `${identifier} matrix width drifted`)
     assert.equal(Number(matrix['MatrixHeight']), 2 ** z, `${identifier} matrix height drifted`)
+    // webMercatorTileBounds assumes the projection origin at the top-left corner of z0. A matrix set
+    // anchored anywhere else would return correctly named tiles covering the wrong ground. Services
+    // publish this corner rounded, so compare within a meter: a matrix set anchored elsewhere is
+    // off by degrees of longitude, never by centimeters.
+    const [cornerX, cornerY] = requiredString(matrix['TopLeftCorner'], `${identifier} TopLeftCorner`)
+      .split(/\s+/)
+      .map(Number)
+    const [expectedMinX, , , expectedMaxY] = webMercatorTileBounds(0, 0, 0)
+    assert.ok(
+      cornerX !== undefined && Math.abs(cornerX - expectedMinX) < ORIGIN_TOLERANCE_METERS,
+      `${identifier} top-left x ${cornerX} drifted from the projection origin ${expectedMinX}`
+    )
+    assert.ok(
+      cornerY !== undefined && Math.abs(cornerY - expectedMaxY) < ORIGIN_TOLERANCE_METERS,
+      `${identifier} top-left y ${cornerY} drifted from the projection origin ${expectedMaxY}`
+    )
   }
   console.log(`${source.id}: WMTS capabilities verified through z${source.maxzoom}`)
 }
 
-await Promise.all([
-  ...CHART_SOURCES.map(checkSource),
-  checkWmsCapabilities(CHART_SOURCES),
-  ...CHART_SOURCES.filter((source) => source.upstream.mode === 'wmts').map(checkWmtsCapabilities)
-])
+const checks: ReadonlyArray<readonly [string, Promise<void>]> = [
+  ...CHART_SOURCES.map((source) => [source.id, checkSource(source)] as const),
+  ['WMS capabilities', checkWmsCapabilities(CHART_SOURCES)] as const,
+  ...CHART_SOURCES.filter((source) => source.upstream.mode === 'wmts').map(
+    (source) => [`${source.id} WMTS capabilities`, checkWmtsCapabilities(source)] as const
+  )
+]
+
+// Report every drifted check from one run. Awaiting them together and rethrowing the first would
+// hide the rest, so a maintainer would fix one source and rediscover the others a week later. Each
+// check carries its own label, which keeps the report from depending on positional correlation.
+const outcomes = await Promise.all(
+  checks.map(async ([label, promise]) => {
+    try {
+      await promise
+      return null
+    } catch (error) {
+      return `${label}: ${error instanceof Error ? error.message : String(error)}`
+    }
+  })
+)
 
 assert.ok(chartSourceById('depth-gebco'), 'catalog lookup failed after upstream checks')
+
+const failures = outcomes.filter((outcome) => outcome !== null)
+if (failures.length > 0) {
+  console.error(`\n${failures.length} of ${checks.length} upstream checks failed:`)
+  for (const failure of failures) console.error(`  - ${failure}`)
+  process.exitCode = 1
+} else {
+  console.log(`\nAll ${checks.length} upstream checks passed.`)
+}
