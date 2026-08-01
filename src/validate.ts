@@ -146,13 +146,16 @@ export function assertTileCoordinate(z: number, x: number, y: number): void {
 }
 
 export function assertLngLatBbox(value: unknown, label = 'bbox'): asserts value is LngLatBbox {
-  if (
-    !Array.isArray(value) ||
-    value.length !== 4 ||
-    ![0, 1, 2, 3].every((index) => Object.hasOwn(value, index)) ||
-    !value.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate))
-  ) {
-    throw new RangeError(`${label} must contain four finite coordinates`)
+  const wrongShape = `${label} must contain four finite coordinates`
+  if (!Array.isArray(value) || value.length !== 4) throw new RangeError(wrongShape)
+  // Indexed rather than [0,1,2,3].every(...) plus value.every(...): a source may carry up to 64
+  // coverage boxes and this runs per box, per validation, and expandUpstreamUrl revalidates the
+  // whole source on every tile. The array-and-closure form allocated twice per box.
+  for (let index = 0; index < 4; index++) {
+    const coordinate: unknown = value[index]
+    if (!Object.hasOwn(value, index) || typeof coordinate !== 'number' || !Number.isFinite(coordinate)) {
+      throw new RangeError(wrongShape)
+    }
   }
   const [west, south, east, north] = value
   if (west < -180 || west > 180 || east < -180 || east > 180) {
@@ -165,6 +168,31 @@ export function assertLngLatBbox(value: unknown, label = 'bbox'): asserts value 
   // the wrap arm and read as a full 360 degree span.
   const longitudeSpan = west < east ? east - west : west > east ? 360 - west + east : 0
   if (longitudeSpan <= 0 || south >= north) throw new RangeError(`${label} must cover a non-zero area`)
+}
+
+// A dotted quad, in the single form the URL parser normalizes every IPv4 spelling to. Octal, hex,
+// and integer spellings all arrive here already rewritten, so this one pattern covers them.
+const IPV4_LITERAL = /^\d{1,3}(?:\.\d{1,3}){3}$/
+// RFC 6761 reserves localhost and everything under it to the loopback interface. Spelled as two
+// string comparisons rather than /^localhost$|\.localhost$/, whose unanchored second alternative
+// makes the engine retry at every position of the host. This runs on every URL of every validation.
+const LOOPBACK_NAME = 'localhost'
+const isLoopbackName = (hostname: string): boolean =>
+  hostname === LOOPBACK_NAME || hostname.endsWith(`.${LOOPBACK_NAME}`)
+
+/**
+ * Require a host that can plausibly be a public chart service: a DNS name, never an address literal
+ * or a reserved loopback name. Address literals are rejected wholesale rather than range by range,
+ * which keeps the private-range table in the one place that can act on it. A name still resolves at
+ * request time, and a public name can resolve (or rebind) to a private address, so the consuming
+ * server must check the resolved IP as well. This is the definition-time half of that pair.
+ */
+function assertPublicHost(hostname: string, label: string): void {
+  // The URL parser brackets an IPv6 literal, so the opening bracket identifies the whole family.
+  if (hostname.startsWith('[') || IPV4_LITERAL.test(hostname)) {
+    throw new TypeError(`${label} must name a host, not an IP address literal`)
+  }
+  if (isLoopbackName(hostname)) throw new TypeError(`${label} must not name the loopback host`)
 }
 
 function parseHttpsUrl(value: unknown, label: string): URL {
@@ -180,6 +208,12 @@ function parseHttpsUrl(value: unknown, label: string): URL {
   if (url.protocol !== 'https:') throw new TypeError(`${label} must use https`)
   if (url.hostname === '') throw new TypeError(`${label} must include a host`)
   if (url.username !== '' || url.password !== '') throw new TypeError(`${label} must not include credentials`)
+  // The parser drops an explicit 443, so a surviving port is always a non-default one. A chart
+  // service on an odd port is far more likely to be an internal target than a public upstream.
+  if (url.port !== '') throw new TypeError(`${label} must not include a port`)
+  // Already lowercase: the URL parser normalizes the host of a special scheme, so https never
+  // reaches here mixed-case and a toLowerCase copy would be a per-tile allocation for nothing.
+  assertPublicHost(url.hostname, label)
   // A bare trailing "#" parses to an empty hash, so check the raw text as well.
   if (url.hash !== '' || value.includes('#')) throw new TypeError(`${label} must not include a fragment`)
   return url
@@ -260,7 +294,21 @@ function normalizedHost(value: unknown, label: string): string {
   ) {
     throw new TypeError(`${label} is not a valid host`)
   }
-  return url.hostname.toLowerCase()
+  const hostname = url.hostname.toLowerCase()
+  assertPublicHost(hostname, label)
+  return hostname
+}
+
+/**
+ * Require an absent or positive safe-integer field, the shape every optional count here uses. The id
+ * and field name are passed separately so the sentence is only built on the throw path; this runs on
+ * every source of every validation, and expandUpstreamUrl revalidates per tile.
+ */
+function assertOptionalPositiveInteger(value: unknown, id: string, field: string): void {
+  if (value === undefined) return
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`${id} ${field} must be a positive safe integer`)
+  }
 }
 
 /**
@@ -298,18 +346,15 @@ export function validateChartSource(source: unknown): asserts source is ChartSou
   const coverage = source['coverage']
   if (coverage !== undefined) {
     assertBoundedArray(coverage, `${id} coverage`, 'boxes', MAX_COVERAGE_BOXES)
-    coverage.forEach((bbox, index) => {
-      assertLngLatBbox(bbox, `${id} coverage[${index}]`)
-    })
+    // Indexed rather than forEach, so no closure is allocated for a list that may hold 64 boxes and
+    // is re-walked on every validation.
+    for (let index = 0; index < coverage.length; index++) {
+      assertLngLatBbox(coverage[index], `${id} coverage[${index}]`)
+    }
   }
 
-  const fallbackTileBytes = source['fallbackTileBytes']
-  if (
-    fallbackTileBytes !== undefined &&
-    (typeof fallbackTileBytes !== 'number' || !Number.isSafeInteger(fallbackTileBytes) || fallbackTileBytes <= 0)
-  ) {
-    throw new RangeError(`${id} fallbackTileBytes must be a positive safe integer`)
-  }
+  assertOptionalPositiveInteger(source['fallbackTileBytes'], id, 'fallbackTileBytes')
+  assertOptionalPositiveInteger(source['maxAgeSeconds'], id, 'maxAgeSeconds')
 
   const group = source['group']
   if (group !== undefined) {
@@ -321,10 +366,15 @@ export function validateChartSource(source: unknown): asserts source is ChartSou
   const upstream = source['upstream']
   assertRecord(upstream, `${id} upstream`)
   switch (upstream['mode']) {
-    case 'xyz':
     case 'wmts':
       assertTemplate(upstream['urlTemplate'], `${id} template`)
       break
+    case 'xyz': {
+      assertTemplate(upstream['urlTemplate'], `${id} template`)
+      const tileJsonUrl = upstream['tileJsonUrl']
+      if (tileJsonUrl !== undefined) parseHttpsUrl(tileJsonUrl, `${id} TileJSON URL`)
+      break
+    }
     case 'wms': {
       const layers = upstream['layers']
       const styles = upstream['styles']
