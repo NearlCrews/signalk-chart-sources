@@ -9,6 +9,31 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+### Added
+
+- Cover more rejection and invariant cases in the test suite: an out-of-range east longitude, a
+  65-box coverage list, a 33-host style allowlist, first-occurrence-wins deduplication in
+  `estimateBytes`, the 1,000,000-tile default enumeration limit, and deep freezing of a source's
+  nested group, bounds, and coverage values. Failure assertions now check the thrown error's type as
+  well as its message.
+
+### Changed
+
+- Name all six characters a WMS layer, style, or format value may not contain (`&`, `?`, `#`, `+`,
+  `;`, and `=`) when rejecting one. The previous message stopped after the first four, although all
+  six were rejected. A bounded array field given a non-array now says it must be an array, keeping
+  the dense-array wording for an array with holes.
+- Document every category of failure `validateChartSource` throws for: tile size, the TTL count, and
+  the group descriptor join the previously documented list.
+- Fill the `tilesInBbox` array directly from the computed tile ranges instead of draining the lazy
+  iterator: the same tiles in the same order, under the same fail-closed checks, without a generator
+  suspend and resume per tile on the warming hot path.
+- Run the test suite once, under the coverage thresholds, in both the CI and publish workflows, and
+  drop the second Biome lint pass from `verify:commit`.
+- Check workflow action references from the parsed jobs and steps, including a job-level `uses:`,
+  instead of scanning the raw text, and pack the smoke-test tarball with `--ignore-scripts` so it
+  reflects the exact build its caller just produced.
+
 ## [0.7.0] - 2026-08-01
 
 ### Added
