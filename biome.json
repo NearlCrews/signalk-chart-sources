@@ -6,8 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": true,
-    "includes": ["**", "!dist", "!coverage", "!package", "!.cache", "!.cave", "!.claude", "!.remember"]
+    "ignoreUnknown": true
   },
   "formatter": {
     "enabled": true,

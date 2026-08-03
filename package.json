@@ -37,7 +37,7 @@
     "package:lint": "publint --strict",
     "package:check": "npm run package:lint && npm run test:package",
     "audit:runtime": "npm audit --omit=dev",
-    "verify:commit": "npm run ci:biome && npm run ci:workflows && npm run lint && npm run deadcode",
+    "verify:commit": "npm run ci:biome && npm run ci:workflows && npm run lint:docs && npm run spellcheck && npm run deadcode",
     "verify:fast": "npm run verify:commit && npm run typecheck",
     "verify": "npm run verify:fast && npm test && npm run test:coverage && npm run build && npm run package:check && npm audit && npm run audit:runtime"
   },

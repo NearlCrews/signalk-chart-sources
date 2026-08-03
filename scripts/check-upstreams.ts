@@ -6,6 +6,7 @@ import {
   chartSourceById,
   expandUpstreamUrl,
   type LngLatBbox,
+  MAX_MERCATOR_LAT,
   tileForLngLat,
   webMercatorTileBounds
 } from '../src/index.js'
@@ -13,6 +14,8 @@ import {
 const REQUEST_TIMEOUT_MS = 30_000
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 const MAX_FETCH_ATTEMPTS = 2
+/** Pause between fetch attempts, so a transient upstream error gets a moment to clear. */
+const RETRY_DELAY_MS = 500
 /** How far a published WMTS matrix corner may sit from the projection origin before it is drift. */
 const ORIGIN_TOLERANCE_METERS = 1
 const USER_AGENT = 'signalk-chart-sources-upstream-monitor/1.0'
@@ -58,8 +61,8 @@ function requiredString(value: unknown, label: string): string {
   return value
 }
 
-function parseXml(bytes: Uint8Array, label: string): RecordValue {
-  const parsed: unknown = XML.parse(new TextDecoder().decode(bytes))
+function parseXml(input: Uint8Array | string, label: string): RecordValue {
+  const parsed: unknown = XML.parse(typeof input === 'string' ? input : new TextDecoder().decode(input))
   return record(parsed, label)
 }
 
@@ -118,7 +121,7 @@ async function fetchBytes(url: string): Promise<{ response: Response; bytes: Uin
       return await fetchBytesOnce(url)
     } catch (error) {
       lastError = error
-      if (attempt < MAX_FETCH_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 500))
+      if (attempt < MAX_FETCH_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
     }
   }
   throw lastError
@@ -155,8 +158,11 @@ function bboxCenter(bbox: LngLatBbox): readonly [number, number] {
   return [longitude, (south + north) / 2]
 }
 
+/** The whole Web Mercator square, for a source that declares neither bounds nor coverage. */
+const WORLD_BBOX: LngLatBbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
+
 function representativeTile(source: ChartSource): readonly [number, number, number] {
-  const bbox = source.coverage?.[0] ?? source.bounds ?? [-180, -85, 180, 85]
+  const bbox = source.coverage?.[0] ?? source.bounds ?? WORLD_BBOX
   const [longitude, latitude] = bboxCenter(bbox)
   const z = Math.min(source.maxzoom, Math.max(source.minzoom, 4))
   const { x, y } = tileForLngLat(longitude, latitude, z)
@@ -329,7 +335,7 @@ async function checkWmsCapabilities(sources: readonly ChartSource[]): Promise<vo
     [...byBase].map(async ([base, grouped]) => {
       const { bytes } = await fetchBytes(wmsCapabilitiesUrl(base))
       const xml = new TextDecoder().decode(bytes)
-      const root = wmsRoot(parseXml(bytes, `${base} capabilities`), `${base} WMS root`)
+      const root = wmsRoot(parseXml(xml, `${base} capabilities`), `${base} WMS root`)
       assert.equal(root['@_version'], '1.3.0', `${base} WMS version drifted`)
       const capability = record(root['Capability'], `${base} Capability`)
       const request = record(capability['Request'], `${base} Request`)
@@ -429,8 +435,13 @@ async function checkWmsCapabilities(sources: readonly ChartSource[]): Promise<vo
   )
 }
 
-function wmtsCapabilitiesUrl(template: string): string {
-  const url = checkedHttpsUrl(template.replaceAll('{z}', '0').replaceAll('{x}', '0').replaceAll('{y}', '0'))
+/** The template with its tokens zeroed: a valid URL whose query still names the configured layer. */
+function zeroedTemplateUrl(template: string): URL {
+  return checkedHttpsUrl(template.replaceAll('{z}', '0').replaceAll('{x}', '0').replaceAll('{y}', '0'))
+}
+
+function wmtsCapabilitiesUrl(configured: URL): string {
+  const url = new URL(configured)
   url.search = ''
   url.searchParams.set('SERVICE', 'WMTS')
   url.searchParams.set('VERSION', '1.0.0')
@@ -440,10 +451,8 @@ function wmtsCapabilitiesUrl(template: string): string {
 
 async function checkWmtsCapabilities(source: ChartSource): Promise<void> {
   assert.equal(source.upstream.mode, 'wmts')
-  const configured = checkedHttpsUrl(
-    source.upstream.urlTemplate.replaceAll('{z}', '0').replaceAll('{x}', '0').replaceAll('{y}', '0')
-  )
-  const { bytes } = await fetchBytes(wmtsCapabilitiesUrl(source.upstream.urlTemplate))
+  const configured = zeroedTemplateUrl(source.upstream.urlTemplate)
+  const { bytes } = await fetchBytes(wmtsCapabilitiesUrl(configured))
   const document = parseXml(bytes, `${source.id} capabilities`)
   const root = record(document['Capabilities'], `${source.id} WMTS root`)
   assert.equal(root['@_version'], '1.0.0', `${source.id} WMTS version drifted`)
