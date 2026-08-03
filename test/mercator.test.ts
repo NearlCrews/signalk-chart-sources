@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  DEFAULT_MAX_ENUMERATED_TILES,
   iterateTilesInBbox,
   MAX_MERCATOR_LAT,
   tileCountInBbox,
@@ -8,9 +9,8 @@ import {
   tilesInBbox,
   webMercatorTileBounds
 } from '../src/mercator.js'
-import { CHART_SOURCES } from '../src/registry.js'
 import type { ChartSource, LngLatBbox, ZoomRange } from '../src/types.js'
-import { makeSource } from './fixtures.js'
+import { makeSource, src } from './fixtures.js'
 
 const WORLD: LngLatBbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
 
@@ -163,7 +163,10 @@ test('iterateTilesInBbox rejects bad input when it is called, not when it is fir
   // contract does not depend on the consumer choosing to iterate.
   const invalid = { ...makeSource(), id: 'NOT A VALID ID' } as unknown as ChartSource
   assert.throws(() => iterateTilesInBbox(invalid, [-1, -1, 1, 1], [1, 1]), TypeError)
-  assert.throws(() => iterateTilesInBbox(makeSource(), [5, 5, 5, 5], [1, 1]), /non-zero area/)
+  assert.throws(() => iterateTilesInBbox(makeSource(), [5, 5, 5, 5], [1, 1]), {
+    name: 'RangeError',
+    message: /non-zero area/
+  })
   assert.throws(() => iterateTilesInBbox(makeSource(), [-1, -1, 1, 1], [1, 1], { maxTiles: 0 }), RangeError)
 })
 
@@ -231,8 +234,7 @@ test('overlapping coverage regions stay deduplicated across a multi-zoom range',
 })
 
 test('tileCountInBbox clamps a vector source to vectorMaxzoom even when asked for a higher zoom', () => {
-  const basemap = CHART_SOURCES.find((s) => s.id === 'basemap')
-  assert.ok(basemap, 'basemap source must exist')
+  const basemap = src('basemap')
   // The basemap maxzoom is 20 but vectorMaxzoom is 14; a request for z0..16 must enumerate no tiles above 14.
   const wide = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 16])
   const at14 = tileCountInBbox(basemap, [-10, 40, 10, 55], [0, 14])
@@ -245,12 +247,21 @@ test('tile math rejects non-finite coordinates and invalid zooms', () => {
   assert.throws(() => tileForLngLat(0, 0, 1.5), RangeError)
   assert.throws(() => tileForLngLat(0, 0, -1), RangeError)
   assert.throws(() => webMercatorTileBounds(1, 2, 0), RangeError)
-  assert.throws(() => tileCountInBbox(makeSource(), [-1, -1, 1, 1], [3, 2]), RangeError)
+  assert.throws(() => tileCountInBbox(makeSource(), [-1, -1, 1, 1], [3, 2]), {
+    name: 'RangeError',
+    message: /must not exceed/
+  })
 })
 
 test('enumeration fails before allocating an unsafe array and supports lazy iteration', () => {
+  // Pin the exported default and match it in the message, so the runtime limit cannot diverge from
+  // the constant's advertised value.
+  assert.equal(DEFAULT_MAX_ENUMERATED_TILES, 1_000_000)
   assert.equal(tileCountInBbox(makeSource(), WORLD, [16, 16]), 4_294_967_296)
-  assert.throws(() => tilesInBbox(makeSource(), WORLD, [16, 16]), /exceeds maxTiles/)
+  assert.throws(
+    () => tilesInBbox(makeSource(), WORLD, [16, 16]),
+    new RegExp(`exceeds maxTiles ${DEFAULT_MAX_ENUMERATED_TILES}$`)
+  )
   assert.deepEqual(
     [...iterateTilesInBbox(makeSource(), [-10, -10, 10, 10], [1, 1], { maxTiles: 10 })],
     tilesInBbox(makeSource(), [-10, -10, 10, 10], [1, 1])

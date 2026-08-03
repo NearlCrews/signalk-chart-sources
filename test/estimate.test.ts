@@ -2,19 +2,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DEFAULT_TILE_BYTES_BY_MODE, estimateBytes } from '../src/estimate.js'
 import { tileCountInBbox } from '../src/mercator.js'
-import { chartSourceById } from '../src/registry.js'
 import type { LngLatBbox } from '../src/types.js'
-import { makeSource } from './fixtures.js'
+import { makeSource, src } from './fixtures.js'
 
 const BBOX: LngLatBbox = [-1, -1, 1, 1]
 const SAN_FRANCISCO: LngLatBbox = [-122.5, 37.5, -122.0, 38.0]
-
-// A typo'd id must fail the test, not silently return undefined, so lookups assert.
-const src = (id: string) => {
-  const source = chartSourceById(id)
-  assert.ok(source, `${id} must be in the catalog`)
-  return source
-}
 
 test('the exported fallback constants hold their documented values', () => {
   // These are part of the published contract and estimateBytes never reaches them for a catalog
@@ -68,7 +60,10 @@ test('estimateBytes counts a duplicated source id once', () => {
 })
 
 test('estimateBytes fails closed for unknown source ids', () => {
-  assert.throws(() => estimateBytes(['does-not-exist'], BBOX, [6, 6], {}), /unknown chart source/)
+  assert.throws(() => estimateBytes(['does-not-exist'], BBOX, [6, 6], {}), {
+    name: 'RangeError',
+    message: /unknown chart source/
+  })
 })
 
 test('estimateBytes accepts a whole source, so a consumer can price one it defined itself', () => {
@@ -82,15 +77,22 @@ test('estimateBytes accepts a whole source, so a consumer can price one it defin
   const both = estimateBytes([custom, 'seamark'], BBOX, [6, 6], {})
   assert.equal(both, estimateBytes([custom], BBOX, [6, 6], {}) + estimateBytes(['seamark'], BBOX, [6, 6], {}))
   assert.equal(estimateBytes([custom, custom, 'seamark', 'seamark'], BBOX, [6, 6], {}), both)
+  // The first occurrence wins: a whole source under a catalog id shadows the id listed after it.
+  const shadowing = makeSource({ id: 'seamark', fallbackTileBytes: 1 })
+  const shadowedTiles = tileCountInBbox(shadowing, BBOX, [6, 6])
+  assert.equal(estimateBytes([shadowing, 'seamark'], BBOX, [6, 6], {}), shadowedTiles * 1)
 })
 
 test('estimateBytes checks a supplied source before trusting it', () => {
   // The id is checked first, because an unchecked one could name itself into the averages lookup,
   // or into the dedupe set to suppress a real source that shares the id.
   const invalid = makeSource({ id: 'Not A Valid Id' })
-  assert.throws(() => estimateBytes([invalid], BBOX, [6, 6], {}), /invalid source id/)
+  assert.throws(() => estimateBytes([invalid], BBOX, [6, 6], {}), { name: 'TypeError', message: /invalid source id/ })
   // The rest of the shape is still checked, by tileCountInBbox, before any tile is counted.
-  assert.throws(() => estimateBytes([makeSource({ maxzoom: -1 })], BBOX, [6, 6], {}), /maxzoom must be an integer/)
+  assert.throws(() => estimateBytes([makeSource({ maxzoom: -1 })], BBOX, [6, 6], {}), {
+    name: 'RangeError',
+    message: /maxzoom must be an integer/
+  })
 })
 
 test('estimateBytes treats a global source (no bounds) as covering any non-empty bbox', () => {
@@ -98,8 +100,11 @@ test('estimateBytes treats a global source (no bounds) as covering any non-empty
 })
 
 test('estimateBytes returns 0 for a bounded source when the bbox falls outside its bounds', () => {
-  // depth-emodnet covers Europe; San Francisco Bay lies outside its bounds.
-  assert.equal(estimateBytes(['depth-emodnet'], SAN_FRANCISCO, [6, 8], {}), 0)
+  // mpa-emodnet carries bounds and no coverage, so this isolates the bounds arm of the clip;
+  // San Francisco Bay lies outside its European envelope.
+  const bounded = src('mpa-emodnet')
+  assert.equal(bounded.coverage, undefined, 'mpa-emodnet must stay a bounds-only source for this test')
+  assert.equal(estimateBytes(['mpa-emodnet'], SAN_FRANCISCO, [6, 8], {}), 0)
 })
 
 test('estimateBytes rejects invalid measured averages', () => {
@@ -110,5 +115,8 @@ test('estimateBytes rejects invalid measured averages', () => {
 
 test('estimateBytes rejects totals beyond Number.MAX_SAFE_INTEGER', () => {
   const world: LngLatBbox = [-180, -85, 180, 85]
-  assert.throws(() => estimateBytes(['seamark'], world, [0, 18], { seamark: 1_000_000 }), /safe integer/)
+  assert.throws(() => estimateBytes(['seamark'], world, [0, 18], { seamark: 1_000_000 }), {
+    name: 'RangeError',
+    message: /safe integer/
+  })
 })

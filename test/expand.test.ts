@@ -167,11 +167,17 @@ test('proxyTileTemplate builds the plugin-facing tile template', () => {
   )
   assert.throws(() => proxyTileTemplate('', 'depth-gebco'), TypeError)
   assert.throws(() => proxyTileTemplate('/plugins/signalk-chart-locker', '../secret'), TypeError)
-  assert.throws(() => proxyTileTemplate('/plugins/chart locker', 'depth-gebco'), /whitespace/)
+  assert.throws(() => proxyTileTemplate('/plugins/chart locker', 'depth-gebco'), {
+    name: 'TypeError',
+    message: /whitespace/
+  })
   assert.throws(() => proxyTileTemplate('/plugins/x?a=1', 'depth-gebco'), TypeError)
   assert.throws(() => proxyTileTemplate('/plugins/{z}', 'depth-gebco'), TypeError)
   // URL parsers read a backslash as a path separator, so the template text would not describe the
   // path a client actually requests.
-  assert.throws(() => proxyTileTemplate('/plugins/a\\b', 'depth-gebco'), /backslashes/)
-  assert.throws(() => proxyTileTemplate(undefined as unknown as string, 'depth-gebco'), /must be a string/)
+  assert.throws(() => proxyTileTemplate('/plugins/a\\b', 'depth-gebco'), { name: 'TypeError', message: /backslashes/ })
+  assert.throws(() => proxyTileTemplate(undefined as unknown as string, 'depth-gebco'), {
+    name: 'TypeError',
+    message: /must be a string/
+  })
 })
