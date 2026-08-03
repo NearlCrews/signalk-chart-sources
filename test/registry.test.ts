@@ -4,13 +4,7 @@ import { EXPECTED_EXPORTS } from '../scripts/expected-exports.mjs'
 import { expandUpstreamUrl } from '../src/expand.js'
 import { assertGroupCoherence, CHART_SOURCES, chartSourceById } from '../src/registry.js'
 import type { ChartSource, LngLatBbox } from '../src/types.js'
-
-// A typo'd id must fail the test, not silently return undefined, so lookups assert.
-const src = (id: string): ChartSource => {
-  const s = chartSourceById(id)
-  assert.ok(s, `${id} must be in the catalog`)
-  return s
-}
+import { src } from './fixtures.js'
 
 const inBox = (b: LngLatBbox | undefined, lng: number, lat: number): boolean =>
   b !== undefined && lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3]
@@ -127,11 +121,15 @@ test('chart bounds preserve service coverage envelopes', () => {
 
 test('the catalog and every nested source object are immutable', () => {
   assert.ok(Object.isFrozen(CHART_SOURCES))
-  const source = src('depth-gebco')
-  assert.ok(Object.isFrozen(source))
-  assert.ok(Object.isFrozen(source.upstream))
+  // A source carrying a group, bounds, and coverage, so the nested-object claim is fully exercised.
+  const source = src('depth-emodnet')
+  const { bounds, coverage, group } = source
+  assert.ok(bounds && coverage && group, 'depth-emodnet must carry bounds, coverage, and a group')
+  for (const nested of [source, source.upstream, group, bounds, coverage, ...coverage]) {
+    assert.ok(Object.isFrozen(nested), 'every nested source object must be frozen')
+  }
   assert.throws(() => (CHART_SOURCES as unknown as ChartSource[]).pop(), TypeError)
-  assert.equal(chartSourceById('depth-gebco'), source)
+  assert.equal(chartSourceById('depth-emodnet'), source)
 })
 
 test('every source has a sane zoom range and a vectorMaxzoom within maxzoom', () => {

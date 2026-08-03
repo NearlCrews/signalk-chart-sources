@@ -25,11 +25,26 @@ test('validateChartSource narrows an unknown source after complete runtime valid
 })
 
 test('validateChartSource rejects invalid ids, zooms, coverage, estimates, and templates', () => {
-  assert.throws(() => validateChartSource(makeSource({ id: '../x' })), /invalid source id/)
-  assert.throws(() => validateChartSource(makeSource({ minzoom: 4, maxzoom: 3 })), /minzoom exceeds/)
-  assert.throws(() => validateChartSource(makeSource({ coverage: [] })), /coverage must contain/)
-  assert.throws(() => validateChartSource(makeSource({ bounds: [180, -1, -180, 1] })), /non-zero area/)
-  assert.throws(() => validateChartSource(makeSource({ fallbackTileBytes: -1 })), /positive safe integer/)
+  assert.throws(() => validateChartSource(makeSource({ id: '../x' })), {
+    name: 'TypeError',
+    message: /invalid source id/
+  })
+  assert.throws(() => validateChartSource(makeSource({ minzoom: 4, maxzoom: 3 })), {
+    name: 'RangeError',
+    message: /minzoom exceeds/
+  })
+  assert.throws(() => validateChartSource(makeSource({ coverage: [] })), {
+    name: 'RangeError',
+    message: /coverage must contain/
+  })
+  assert.throws(() => validateChartSource(makeSource({ bounds: [180, -1, -180, 1] })), {
+    name: 'RangeError',
+    message: /non-zero area/
+  })
+  assert.throws(() => validateChartSource(makeSource({ fallbackTileBytes: -1 })), {
+    name: 'RangeError',
+    message: /positive safe integer/
+  })
   assert.throws(
     () =>
       validateChartSource(
@@ -61,10 +76,10 @@ test('validateChartSource rejects malformed runtime shapes and unknown modes', (
   assert.throws(() => validateChartSource({ ...makeSource(), upstream: { mode: 'bogus' } }), /unknown upstream mode/)
   assert.throws(() => validateChartSource({ ...makeSource(), group: { id: '', title: '' } }), /group id/)
   const sparseCoverage = Array<readonly [number, number, number, number]>(1)
-  assert.throws(
-    () => validateChartSource({ ...makeSource(), coverage: sparseCoverage }),
-    /coverage must be a dense array/
-  )
+  assert.throws(() => validateChartSource({ ...makeSource(), coverage: sparseCoverage }), {
+    name: 'TypeError',
+    message: /coverage must be a dense array/
+  })
 })
 
 test('validateChartSource checks URL safety and every WMS runtime field', () => {
@@ -111,10 +126,10 @@ test('validateChartSource checks URL safety and every WMS runtime field', () => 
     () => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, format: '' } }),
     /between 1 and/
   )
-  assert.throws(
-    () => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, transparent: 'yes' } }),
-    /must be boolean/
-  )
+  assert.throws(() => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, transparent: 'yes' } }), {
+    name: 'TypeError',
+    message: /must be boolean/
+  })
 })
 
 test('validateChartSource rejects bare query and fragment markers, host tokens, ports, and plus signs', () => {
@@ -359,14 +374,14 @@ test('source text allows the whitespace controls markup uses and rejects the res
 })
 
 test('validateChartSource enforces tileSize, vectorMaxzoom, and latitude bounds', () => {
-  assert.throws(
-    () => validateChartSource(makeSource({ tileSize: 128 as unknown as 256 })),
-    /tileSize must be 256 or 512/
-  )
-  assert.throws(
-    () => validateChartSource(makeSource({ tileSize: '256' as unknown as 256 })),
-    /tileSize must be 256 or 512/
-  )
+  assert.throws(() => validateChartSource(makeSource({ tileSize: 128 as unknown as 256 })), {
+    name: 'RangeError',
+    message: /tileSize must be 256 or 512/
+  })
+  assert.throws(() => validateChartSource(makeSource({ tileSize: '256' as unknown as 256 })), {
+    name: 'RangeError',
+    message: /tileSize must be 256 or 512/
+  })
   assert.doesNotThrow(() => validateChartSource(makeSource({ minzoom: 2, maxzoom: 10, vectorMaxzoom: 6 })))
   assert.throws(
     () => validateChartSource(makeSource({ minzoom: 2, maxzoom: 10, vectorMaxzoom: 11 })),
@@ -379,6 +394,7 @@ test('validateChartSource enforces tileSize, vectorMaxzoom, and latitude bounds'
   assert.throws(() => validateChartSource(makeSource({ bounds: [-1, -91, 1, 1] })), /latitudes must fall within/)
   assert.throws(() => validateChartSource(makeSource({ bounds: [-1, -1, 1, 91] })), /latitudes must fall within/)
   assert.throws(() => validateChartSource(makeSource({ bounds: [-181, -1, 1, 1] })), /longitudes must fall within/)
+  assert.throws(() => validateChartSource(makeSource({ bounds: [1, -1, 181, 1] })), /longitudes must fall within/)
 })
 
 test('style and base URLs must be absolute https, not just template URLs', () => {
@@ -397,6 +413,22 @@ test('style and base URLs must be absolute https, not just template URLs', () =>
 test('validateChartSource rejects a zero-width bounds box', () => {
   assert.throws(() => validateChartSource(makeSource({ bounds: [10, 0, 10, 10] })), /non-zero area/)
   assert.throws(() => validateChartSource(makeSource({ coverage: [[10, 0, 10, 10]] })), /non-zero area/)
+})
+
+test('coverage and allowedHosts reject lists longer than their documented bounds', () => {
+  const boxes = Array.from({ length: 65 }, (_, index) => [index - 60, 0, index - 59.5, 1] as const)
+  assert.throws(() => validateChartSource(makeSource({ coverage: boxes })), {
+    name: 'RangeError',
+    message: /between 1 and 64 boxes/
+  })
+  const hosts = Array.from({ length: 33 }, (_, index) => `h${index}.example`)
+  assert.throws(
+    () =>
+      validateChartSource(
+        makeSource({ upstream: { mode: 'style', styleUrl: 'https://h0.example/s.json', allowedHosts: hosts } })
+      ),
+    { name: 'RangeError', message: /between 1 and 32 hosts/ }
+  )
 })
 
 test('validateChartSource checks style host shape and authorization case-insensitively', () => {
@@ -422,7 +454,7 @@ test('validateChartSource checks style host shape and authorization case-insensi
         ...makeSource(),
         upstream: { mode: 'style', styleUrl: 'https://tiles.example/style.json', allowedHosts: 'tiles.example' }
       }),
-    /allowedHosts must be a dense array/
+    /allowedHosts must be an array/
   )
   assert.throws(
     () =>
