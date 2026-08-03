@@ -50,9 +50,9 @@ import { chartSourceById, tileCountInBbox } from 'signalk-chart-sources'
 - `CHART_SOURCES`: the deeply frozen, readonly catalog.
 - `chartSourceById(id)`: return the immutable source with that stable id, or `undefined`.
 - `validateChartSource(source)`: validate a built-in or consumer-supplied source and throw on an
-  invalid runtime shape, id, zoom range, URL, bounds, coverage, fallback size, or mode-specific
-  requirement. Its assertion signature accepts `unknown` and narrows successful values to
-  `ChartSource`.
+  invalid runtime shape, id, text field, tile size, zoom range, URL, bounds, coverage, fallback
+  size, TTL, group descriptor, or mode-specific requirement. Its assertion signature accepts
+  `unknown` and narrows successful values to `ChartSource`.
 - `ChartSource`, `UpstreamTemplate`, and `ChartGroup`: public catalog types.
 
 Each `ChartSource` may contain:
