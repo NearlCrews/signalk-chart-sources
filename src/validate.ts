@@ -3,11 +3,17 @@ import type { ChartSource, LngLatBbox, ZoomRange } from './types.js'
 /** Highest zoom accepted by public tile and source validation. */
 export const MAX_TILE_ZOOM = 30
 
+/** The one WMS protocol version the catalog speaks, shared so the builder and validator agree. */
+export const WMS_VERSION = '1.3.0'
+
 const SOURCE_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/
 // Semicolon joins the separator characters because CGI-style parsers have long accepted it as an
 // alternative to "&", and equals would end the parameter name a server reads.
 const INVALID_QUERY_VALUE_CHARACTER = /[&?#+;=]/
-/** Longest rejected value echoed back in an error, so a hostile input cannot flood a log. */
+/**
+ * Longest rejected value echoed back in an error, so a hostile input cannot flood a log. Counted in
+ * UTF-16 code units, unlike the wire budgets below: the echo is log text, so a loose bound is fine.
+ */
 const MAX_ECHOED_VALUE = 64
 // Any control character at all, then the narrower question of whether a disallowed one is present.
 // The cheap test carries the common case; the double negation reads as "a control that is not tab,
@@ -63,7 +69,7 @@ function assertBoundedArray(
 ): asserts value is readonly unknown[] {
   // Iterate by index rather than with some or every, which skip holes and would report a sparse
   // array as dense.
-  if (!Array.isArray(value)) throw new TypeError(`${label} must be a dense array`)
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`)
   for (let index = 0; index < value.length; index++) {
     if (!Object.hasOwn(value, index)) throw new TypeError(`${label} must be a dense array`)
   }
@@ -221,7 +227,8 @@ function parseHttpsUrl(value: unknown, label: string): URL {
 
 function assertCleanBaseUrl(value: unknown, label: string): void {
   const url = parseHttpsUrl(value, label)
-  // A bare trailing "?" parses to an empty search, so check the raw text as well.
+  // A bare trailing "?" parses to an empty search, so check the raw text as well. The typeof is
+  // narrowing only: parseHttpsUrl proved value is a string, but its signature cannot carry that.
   if (url.search !== '' || (typeof value === 'string' && value.includes('?'))) {
     throw new TypeError(`${label} must not include query parameters`)
   }
@@ -229,9 +236,12 @@ function assertCleanBaseUrl(value: unknown, label: string): void {
 
 function assertTemplate(value: unknown, label: string): void {
   assertBoundedText(value, label, MAX_URL_BYTES)
+  // Deliberately literal, unlike parseHttpsUrl's parser-normalized scheme check: the authority
+  // slice below counts from this exact prefix, and a template cannot be URL-parsed to normalize it.
   if (!value.startsWith('https://')) throw new TypeError(`${label} must use https`)
   // Check the host before the token rules so a host token gets the more specific error. The class
-  // matches every character that ends an authority for the URL parser, backslash included.
+  // matches every character that ends an authority for the URL parser, backslash included. split
+  // with a limit always yields one part; the fallback only satisfies noUncheckedIndexedAccess.
   const authority = value.slice('https://'.length).split(/[/\\?#]/, 1)[0] ?? ''
   if (authority.includes('{')) throw new TypeError(`${label} must not use template tokens in the host`)
   for (const token of ['{z}', '{x}', '{y}']) {
@@ -258,7 +268,7 @@ function assertQueryValue(
 ): asserts value is string {
   assertBoundedText(value, label, maxBytes, allowEmpty)
   if (containsInvalidUrlCharacter(value) || INVALID_QUERY_VALUE_CHARACTER.test(value)) {
-    throw new TypeError(`${label} must not contain whitespace, controls, invisibles, &, ?, #, or +`)
+    throw new TypeError(`${label} must not contain whitespace, controls, invisibles, or the characters & ? # + ; =`)
   }
 }
 
@@ -314,8 +324,9 @@ function assertOptionalPositiveInteger(value: unknown, id: string, field: string
 /**
  * Validate and narrow a built-in or consumer-supplied source.
  *
- * @throws {TypeError | RangeError} When identity, bounded text, zooms, geography, fallback size,
- * HTTPS URLs, URL tokens, WMS parameters, or style-host authorization are invalid.
+ * @throws {TypeError | RangeError} When identity, bounded text, tile size, zooms, geography, the
+ * optional byte and TTL counts, the group descriptor, HTTPS URLs, URL tokens, WMS parameters, or
+ * style-host authorization are invalid.
  */
 export function validateChartSource(source: unknown): asserts source is ChartSource {
   assertRecord(source, 'chart source')
@@ -382,7 +393,7 @@ export function validateChartSource(source: unknown): asserts source is ChartSou
       assertQueryValue(layers, `${id} WMS layers`, MAX_WMS_LAYER_BYTES)
       assertQueryValue(styles, `${id} WMS styles`, MAX_WMS_STYLE_BYTES, true)
       assertWmsLayerLists(layers, styles, id)
-      if (upstream['version'] !== '1.3.0') throw new TypeError(`${id} WMS version must be 1.3.0`)
+      if (upstream['version'] !== WMS_VERSION) throw new TypeError(`${id} WMS version must be ${WMS_VERSION}`)
       assertQueryValue(upstream['format'], `${id} WMS format`, MAX_WMS_FORMAT_BYTES)
       if (typeof upstream['transparent'] !== 'boolean') throw new TypeError(`${id} WMS transparent must be boolean`)
       break

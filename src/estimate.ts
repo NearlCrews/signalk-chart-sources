@@ -70,10 +70,11 @@ export function estimateBytes(
         ? (source.fallbackTileBytes ?? DEFAULT_TILE_BYTES_BY_MODE[source.upstream.mode])
         : validatedAverage(id, measured)
     const sourceTotal = tiles * avg
-    if (!Number.isSafeInteger(sourceTotal) || !Number.isSafeInteger(total + sourceTotal)) {
+    const nextTotal = total + sourceTotal
+    if (!Number.isSafeInteger(sourceTotal) || !Number.isSafeInteger(nextTotal)) {
       throw new RangeError('byte estimate exceeds the safe integer limit')
     }
-    total += sourceTotal
+    total = nextTotal
   }
   return total
 }

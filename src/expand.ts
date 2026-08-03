@@ -103,6 +103,10 @@ export function expandUpstreamUrl(candidate: ChartSource, z: number, x: number, 
   }
 }
 
+// A backslash joins the ban list because URL parsers treat it as a path separator, so a base
+// carrying one would resolve to a different path than the template text reads.
+const INVALID_PLUGIN_BASE_CHARACTER = /[?#{}\\]/
+
 /**
  * Return the plugin-facing tile template after removing trailing slashes from the base.
  *
@@ -113,9 +117,7 @@ export function proxyTileTemplate(pluginBase: string, sourceId: string): string 
   if (typeof pluginBase !== 'string') throw new TypeError('pluginBase must be a string')
   const base = withoutTrailingSlashes(pluginBase)
   if (base === '') throw new TypeError('pluginBase must not be empty')
-  // A backslash joins the ban list because URL parsers treat it as a path separator, so a base
-  // carrying one would resolve to a different path than the template text reads.
-  if (containsInvalidUrlCharacter(base) || /[?#{}\\]/.test(base)) {
+  if (containsInvalidUrlCharacter(base) || INVALID_PLUGIN_BASE_CHARACTER.test(base)) {
     throw new TypeError('pluginBase must not contain whitespace, controls, ?, #, braces, or backslashes')
   }
   assertSourceId(sourceId)
