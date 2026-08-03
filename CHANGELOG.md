@@ -9,6 +9,8 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-02
+
 ### Added
 
 - Cover more rejection and invariant cases in the test suite: an out-of-range east longitude, a
@@ -33,6 +35,11 @@ contract and the Unreleased section for pending compatibility changes.
 - Check workflow action references from the parsed jobs and steps, including a job-level `uses:`,
   instead of scanning the raw text, and pack the smoke-test tarball with `--ignore-scripts` so it
   reflects the exact build its caller just produced.
+- Transcribe the Seascape attribution the service publishes today: the credit now reads Open
+  Waters, shortened upstream from Open Water Software, LLC, for both the raster and vector sources.
+  Both tileset ceilings also follow their published TileJSON: `seascape-dem` moves from zoom 17 to
+  18 and `seascape-vector` from 14 to 15, which raises tile counts and estimates for requests that
+  reach them.
 
 ## [0.7.0] - 2026-08-01
 
@@ -351,7 +358,8 @@ drift. Data and pure helpers only: no MapLibre, no Signal K, and no Node or brow
   Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
   re-validation agrees with the panel estimate. Unknown source ids are skipped.
 
-[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.4.0...v0.5.0
