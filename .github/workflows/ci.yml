@@ -64,17 +64,14 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
-
-      - name: Coverage thresholds
+      - name: Test with coverage thresholds
         run: npm run test:coverage
 
       - name: Verify the packed package
         if: matrix.node-version == 24
         run: npm run test:package
 
-      - name: Audit development dependencies
+      - name: Audit all dependencies
         if: matrix.node-version == 24
         run: npm audit
 

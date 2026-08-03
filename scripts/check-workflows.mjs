@@ -26,43 +26,40 @@ function object(value, label) {
   return value
 }
 
+const sources = new Map()
+
 for (const path of workflows) {
   const source = readFileSync(path, 'utf8')
+  sources.set(path, source)
   const workflow = object(parse(source), path)
   const permissions = object(workflow.permissions, `${path} permissions`)
   assert.deepEqual(permissions, { contents: 'read' }, `${path} must default to read-only contents`)
 
-  for (const match of source.matchAll(/^\s*(?:-\s+)?uses:\s+([^\s#]+)(?:\s+#.*)?$/gmu)) {
-    const reference = match[1]
-    assert.ok(reference, `${path} contains an empty action reference`)
-    if (reference.startsWith('./')) continue
-    const [action, sha] = reference.split('@')
-    // Check the pin and the allowlist separately. Comparing only against the map lets an unpinned
-    // reference to an unreviewed action pass, because both sides come back undefined.
-    assert.match(sha ?? '', /^[0-9a-f]{40}$/, `${path} must pin ${action} to a full commit SHA`)
-    assert.ok(expectedActions.has(action), `${path} uses an unreviewed action: ${action}`)
-    assert.equal(sha, expectedActions.get(action), `${path} must use the reviewed ${action} SHA`)
-  }
-
-  // Every job that widens permissions beyond the read-only default must be listed here, so a new
-  // write scope has to be reviewed rather than merely declared.
+  // Everything below reads the parsed jobs and steps structurally rather than scanning raw text. A
+  // textual scan cannot tell a real step from a comment or an embedded script line that merely
+  // looks like one, and it has to guess where a step ends, which lets a later step's setting
+  // satisfy an earlier checkout that never had one.
   const jobs = object(workflow.jobs, `${path} jobs`)
   for (const [name, job] of Object.entries(jobs)) {
-    const scopes = object(job, `${path} job ${name}`).permissions
-    if (scopes === undefined) continue
-    const expected = allowedJobPermissions.get(`${path}#${name}`)
-    assert.ok(expected, `${path} job ${name} declares unreviewed permissions: ${JSON.stringify(scopes)}`)
-    assert.deepEqual(scopes, expected, `${path} job ${name} must keep its reviewed permissions`)
-  }
+    const details = object(job, `${path} job ${name}`)
 
-  // Read the steps structurally rather than slicing a window of text around each checkout line. A
-  // textual window has to guess where the step ends, and guessing long lets a later step's setting
-  // satisfy an earlier checkout that never had one.
-  for (const [name, job] of Object.entries(jobs)) {
-    const steps = object(job, `${path} job ${name}`).steps ?? []
+    // Every job that widens permissions beyond the read-only default must be listed here, so a new
+    // write scope has to be reviewed rather than merely declared.
+    if (details.permissions !== undefined) {
+      const expected = allowedJobPermissions.get(`${path}#${name}`)
+      assert.ok(expected, `${path} job ${name} declares unreviewed permissions: ${JSON.stringify(details.permissions)}`)
+      assert.deepEqual(details.permissions, expected, `${path} job ${name} must keep its reviewed permissions`)
+    }
+
+    const steps = details.steps === undefined ? [] : details.steps
+    assert.ok(Array.isArray(steps), `${path} job ${name} steps must be an array`)
+    // A job-level uses references a reusable workflow and faces the same review rules as an action.
+    const references = typeof details.uses === 'string' ? [details.uses] : []
     for (const step of steps) {
       const uses = object(step, `${path} job ${name} step`).uses
-      if (typeof uses !== 'string' || !uses.startsWith('actions/checkout@')) continue
+      if (typeof uses !== 'string') continue
+      references.push(uses)
+      if (!uses.startsWith('actions/checkout@')) continue
       const options = step.with
       assert.equal(
         options && typeof options === 'object' ? options['persist-credentials'] : undefined,
@@ -70,16 +67,29 @@ for (const path of workflows) {
         `${path} job ${name} must disable checkout credentials`
       )
     }
+
+    for (const reference of references) {
+      if (reference.startsWith('./')) continue
+      const [action, sha] = reference.split('@')
+      // Check the pin and the allowlist separately. Comparing only against the map lets an unpinned
+      // reference to an unreviewed action pass, because both sides come back undefined.
+      assert.match(sha ?? '', /^[0-9a-f]{40}$/, `${path} must pin ${action} to a full commit SHA`)
+      assert.ok(expectedActions.has(action), `${path} uses an unreviewed action: ${action}`)
+      assert.equal(sha, expectedActions.get(action), `${path} must use the reviewed ${action} SHA`)
+    }
   }
 }
 
-const ci = readFileSync('.github/workflows/ci.yml', 'utf8')
+const ci = sources.get('.github/workflows/ci.yml')
+assert.ok(ci !== undefined, 'ci.yml must be among the checked workflows')
 assert.match(ci, /name:\s+CI success/, 'CI must expose the stable CI success gate')
 assert.match(ci, /run:\s+npm run verify:commit/, 'CI must run repository quality checks')
 assert.match(ci, /git diff --check/, 'CI must check the actual commit or pull-request diff')
 
-const publish = readFileSync('.github/workflows/npm-publish.yml', 'utf8')
-const publishCommand = 'npm publish "./' + '$' + '{packages[0]}" --provenance --access public'
+const publish = sources.get('.github/workflows/npm-publish.yml')
+assert.ok(publish !== undefined, 'npm-publish.yml must be among the checked workflows')
+// biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder is bash interpolation inside the workflow, not a JavaScript template
+const publishCommand = 'npm publish "./${packages[0]}" --provenance --access public'
 for (const required of [
   'cancel-in-progress: false',
   'fetch-depth: 0',

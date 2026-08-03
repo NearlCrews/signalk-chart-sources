@@ -32,8 +32,10 @@ try {
   const existingTarballs = readdirSync(packDestination).filter((name) => name.endsWith('.tgz'))
   assert.deepEqual(existingTarballs, [], `pack destination already contains tarballs: ${existingTarballs.join(', ')}`)
 
-  // npm can print lifecycle banners before the JSON report, so slice from the array start.
-  const packOutput = run('npm', ['pack', '--json', '--pack-destination', packDestination])
+  // Skip the prepare rebuild: every caller builds first, and the tarball must reflect that exact
+  // dist. npm can print lifecycle banners before the JSON report even with scripts ignored, so
+  // slice from the array start.
+  const packOutput = run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', packDestination])
   const reportStart = packOutput.indexOf('[')
   assert.ok(reportStart >= 0, `npm pack produced no JSON report: ${packOutput}`)
   const packed = JSON.parse(packOutput.slice(reportStart))
@@ -105,6 +107,7 @@ try {
       '  expandUpstreamUrl,',
       '  iterateTilesInBbox,',
       '  tileCountInBbox,',
+      '  type ChartGroup,',
       '  type ChartSource,',
       '  type LngLatBbox,',
       '  type MercatorBbox,',
@@ -120,14 +123,18 @@ try {
       "const source: ChartSource | undefined = chartSourceById('depth-gebco')",
       "if (!source) throw new Error('missing source')",
       "const mode: UpstreamTemplate['mode'] = source.upstream.mode",
+      'const group: ChartGroup | undefined = source.group',
       'const count: number = tileCountInBbox(source, bbox, zooms)',
       'const meters: MercatorBbox = webMercatorTileBounds(0, 0, 0)',
       'const url: string = expandUpstreamUrl(source, 0, 0, 0)',
       'const bytes: number = estimateBytes([source.id], bbox, zooms, {})',
       'const first: ZXY | undefined = [...iterateTilesInBbox(source, bbox, zooms, options)][0]',
-      'void [mode, count, meters, url, bytes, first]'
+      'void [mode, group, count, meters, url, bytes, first]'
     ].join('\n')
   )
+  // The consumer compatibility floor: the toolchain a plain Node 22 consumer compiles with,
+  // deliberately pinned rather than read from tsconfig.json so a library target bump cannot raise
+  // the floor without this check flagging it.
   run(
     join(process.cwd(), 'node_modules/.bin/tsc'),
     [
