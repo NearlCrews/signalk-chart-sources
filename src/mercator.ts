@@ -58,14 +58,19 @@ type TileRange = Readonly<{ z: number; x0: number; x1: number; y0: number; y1: n
 
 export const DEFAULT_MAX_ENUMERATED_TILES = 1_000_000
 
-function splitBbox(bbox: LngLatBbox): LngLatBbox[] {
-  assertLngLatBbox(bbox)
+/** Split a box at the antimeridian without revalidating: for boxes a validator already accepted. */
+function splitValidBbox(bbox: LngLatBbox): LngLatBbox[] {
   const [west, south, east, north] = bbox
   if (west < east) return [[west, south, east, north]]
   return [
     [west, south, 180, north],
     [-180, south, east, north]
   ]
+}
+
+function splitBbox(bbox: LngLatBbox): LngLatBbox[] {
+  assertLngLatBbox(bbox)
+  return splitValidBbox(bbox)
 }
 
 function intersectBboxes(left: LngLatBbox, right: LngLatBbox): LngLatBbox | null {
@@ -79,7 +84,9 @@ function intersectBboxes(left: LngLatBbox, right: LngLatBbox): LngLatBbox | null
 function clipBboxes(source: ChartSource, bbox: LngLatBbox): LngLatBbox[] {
   const requested = splitBbox(bbox)
   const coverage = source.coverage ?? (source.bounds ? [source.bounds] : [[-180, -90, 180, 90] as const])
-  const sourceBoxes = coverage.flatMap(splitBbox)
+  // validateChartSource already vetted every source box in coveredRanges, so the split skips a
+  // second per-box validation; only the caller-supplied request box above needs its own check.
+  const sourceBoxes = coverage.flatMap(splitValidBbox)
   const intersections: LngLatBbox[] = []
   for (const requestBox of requested) {
     for (const sourceBox of sourceBoxes) {
@@ -95,7 +102,8 @@ function clipBboxes(source: ChartSource, bbox: LngLatBbox): LngLatBbox[] {
 function zoomBounds(source: ChartSource, zoomRange: ZoomRange): readonly [number, number] {
   assertZoomRange(zoomRange)
   const [zmin, zmax] = zoomRange
-  return [Math.max(zmin, source.minzoom), Math.min(zmax, source.maxzoom, source.vectorMaxzoom ?? source.maxzoom)]
+  // vectorMaxzoom is validated to sit within the zoom range, so whichever ceiling applies is one value.
+  return [Math.max(zmin, source.minzoom), Math.min(zmax, source.vectorMaxzoom ?? source.maxzoom)]
 }
 
 function tileRange(clip: LngLatBbox, z: number): TileRange {
@@ -120,7 +128,7 @@ function disjointRanges(ranges: readonly TileRange[]): TileRange[] {
     for (let i = 0; i < boundaries.length - 1; i++) {
       const x0 = boundaries[i]
       const xEnd = boundaries[i + 1]
-      if (x0 === undefined || xEnd === undefined || x0 >= xEnd) continue
+      if (x0 === undefined || xEnd === undefined) continue
       const intervals = zoomRanges
         .filter((range) => range.x0 <= x0 && range.x1 >= xEnd - 1)
         .map((range) => [range.y0, range.y1] as const)
@@ -139,7 +147,10 @@ function disjointRanges(ranges: readonly TileRange[]): TileRange[] {
       if (current) out.push({ z, x0, x1: xEnd - 1, y0: current[0], y1: current[1] })
     }
   }
-  return out.sort((a, b) => a.z - b.z || a.x0 - b.x0 || a.y0 - b.y0)
+  // Already ordered by construction: byZoom holds zooms in the caller's ascending insertion order,
+  // slabs walk sorted boundaries, and each slab's merged y-intervals flush in ascending order. The
+  // exact-order enumeration tests pin this, so a regression cannot slip out silently.
+  return out
 }
 
 function coveredRanges(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): TileRange[] {
@@ -190,6 +201,21 @@ function* yieldRanges(ranges: readonly TileRange[]): Generator<ZXY, void, undefi
   }
 }
 
+function enumerableRanges(
+  source: ChartSource,
+  bbox: LngLatBbox,
+  zoomRange: ZoomRange,
+  options: TileEnumerationOptions
+): TileRange[] {
+  // Check the caller's own limit before doing any work, so an unusable maxTiles reports itself
+  // instead of being masked by an unsafe-total error from a large box.
+  const limit = enumerationLimit(options)
+  const ranges = coveredRanges(source, bbox, zoomRange)
+  const total = countRanges(ranges)
+  if (total > limit) throw new RangeError(`tile enumeration ${total} exceeds maxTiles ${limit}`)
+  return ranges
+}
+
 /**
  * Lazily enumerate distinct covered tiles. Inputs are validated and the total is checked against
  * maxTiles when the call is made rather than when the generator is first advanced, so a rejected
@@ -204,17 +230,13 @@ export function iterateTilesInBbox(
   zoomRange: ZoomRange,
   options: TileEnumerationOptions = {}
 ): Generator<ZXY, void, undefined> {
-  // Check the caller's own limit before doing any work, so an unusable maxTiles reports itself
-  // instead of being masked by an unsafe-total error from a large box.
-  const limit = enumerationLimit(options)
-  const ranges = coveredRanges(source, bbox, zoomRange)
-  const total = countRanges(ranges)
-  if (total > limit) throw new RangeError(`tile enumeration ${total} exceeds maxTiles ${limit}`)
-  return yieldRanges(ranges)
+  return yieldRanges(enumerableRanges(source, bbox, zoomRange, options))
 }
 
 /**
- * Enumerate distinct covered tiles into an array, subject to a defensive maximum size.
+ * Enumerate distinct covered tiles into an array, subject to a defensive maximum size. Fills the
+ * array directly rather than draining the generator: this is the warming hot path, and iterator
+ * suspend and resume per tile is measurable across a million-tile request.
  *
  * @throws {TypeError | RangeError} Under the same conditions as iterateTilesInBbox.
  */
@@ -224,5 +246,11 @@ export function tilesInBbox(
   zoomRange: ZoomRange,
   options: TileEnumerationOptions = {}
 ): ZXY[] {
-  return [...iterateTilesInBbox(source, bbox, zoomRange, options)]
+  const tiles: ZXY[] = []
+  for (const { z, x0, x1, y0, y1 } of enumerableRanges(source, bbox, zoomRange, options)) {
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) tiles.push({ z, x, y })
+    }
+  }
+  return tiles
 }

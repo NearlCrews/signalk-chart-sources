@@ -1,5 +1,5 @@
 import type { ChartGroup, ChartSource, LngLatBbox } from './types.js'
-import { validateChartSource } from './validate.js'
+import { validateChartSource, WMS_VERSION } from './validate.js'
 
 // Every shared upstream, transcribed from the Binnacle chartplotter source modules so the webapp render
 // config and the companion proxy allowlist never drift. The webapp augments these with its UI-only
@@ -50,9 +50,10 @@ const EMODNET_DTM_COVERAGE: readonly LngLatBbox[] = [
 ]
 /** Display envelope for the EMODnet DTM: the union of the sampled coverage above. */
 const EMODNET_DTM_BOUNDS: LngLatBbox = [-72.5, 10.0, 45.0, 85.0]
-// The quality index and the contours are separate layers over the same grid, and each advertises a
-// slightly smaller reach than the bathymetry does (roughly -70.5 to 43 rather than -73.1 to 45). They
-// share the DTM's coverage, because they render the same data, but not its display envelope.
+// The quality index and the contours are separate layers over the same grid. Each advertises a
+// slightly smaller reach (roughly -70.5 to 43) than the bathymetry layer advertises (-73.1 to 45);
+// both figures are advertised extents, distinct from the narrower sampled union above. They share
+// the DTM's coverage, because they render the same data, but not its display envelope.
 const EMODNET_FACET_BOUNDS: LngLatBbox = [-70.5, 11.0, 43.0, 85.0]
 // The two EMODnet Human Activities overlays are a different service with a different reach, so they
 // carry their own advertised envelopes rather than borrowing the bathymetry's.
@@ -161,12 +162,12 @@ const SEASCAPE_ATTR = '<a href="https://openwaters.io/charts/seascape#license">Â
 
 // Group descriptors shared by a source and its facet, named so the group id cannot diverge between
 // the two and break the webapp's group aggregation.
-const GEBCO_GROUP = { id: 'gebco', title: 'GEBCO (global)' }
-const EMODNET_GROUP = { id: 'emodnet', title: 'EMODnet (Europe)' }
-const BLUETOPO_GROUP = { id: 'bluetopo', title: 'BlueTopo (US)' }
-const NOAA_ENC_GROUP = { id: 'noaa-enc', title: 'NOAA ENC (US)' }
-const EMODNET_MPA_GROUP = { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
-const RADAR_GROUP = { id: 'weather-radar', title: 'Weather radar (US)' }
+const GEBCO_GROUP: ChartGroup = { id: 'gebco', title: 'GEBCO (global)' }
+const EMODNET_GROUP: ChartGroup = { id: 'emodnet', title: 'EMODnet (Europe)' }
+const BLUETOPO_GROUP: ChartGroup = { id: 'bluetopo', title: 'BlueTopo (US)' }
+const NOAA_ENC_GROUP: ChartGroup = { id: 'noaa-enc', title: 'NOAA ENC (US)' }
+const EMODNET_MPA_GROUP: ChartGroup = { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
+const RADAR_GROUP: ChartGroup = { id: 'weather-radar', title: 'Weather radar (US)' }
 
 /** Build a WMS GetMap ChartSource (256 px, EPSG:3857, image/png, transparent), matching the webapp wmsTiles. */
 function wms(
@@ -174,14 +175,11 @@ function wms(
   title: string,
   base: string,
   layers: string,
-  styles: string,
-  extra: {
+  // Field types derive from ChartSource so they cannot drift from it; styles defaults to the empty
+  // server-default form all but two sources use.
+  extra: Pick<ChartSource, 'bounds' | 'coverage' | 'maxAgeSeconds' | 'attribution' | 'group'> & {
     maxzoom?: number
-    bounds?: LngLatBbox
-    coverage?: readonly LngLatBbox[]
-    maxAgeSeconds?: number
-    attribution: string
-    group?: ChartGroup
+    styles?: string
   }
 ): ChartSource {
   return {
@@ -198,7 +196,15 @@ function wms(
     attribution: extra.attribution,
     fallbackTileBytes: 512_000,
     ...(extra.group ? { group: extra.group } : {}),
-    upstream: { mode: 'wms', base, layers, styles, version: '1.3.0', format: 'image/png', transparent: true }
+    upstream: {
+      mode: 'wms',
+      base,
+      layers,
+      styles: extra.styles ?? '',
+      version: WMS_VERSION,
+      format: 'image/png',
+      transparent: true
+    }
   }
 }
 
@@ -208,7 +214,7 @@ function wms(
  * product rather than to any one region.
  */
 function radar(id: string, title: string, region: string, bounds: LngLatBbox): ChartSource {
-  return wms(id, title, NOWCOAST_WMS, `weather_radar:${region}_base_reflectivity_mosaic`, '', {
+  return wms(id, title, NOWCOAST_WMS, `weather_radar:${region}_base_reflectivity_mosaic`, {
     // The mosaic is about 1 km, and a cache re-fetches it every few minutes, so a deeper ceiling
     // would buy blur and pay for it on every refresh rather than once.
     maxzoom: 10,
@@ -220,32 +226,33 @@ function radar(id: string, title: string, region: string, bounds: LngLatBbox): C
 }
 
 const SOURCES: ChartSource[] = [
-  wms('depth-gebco', 'GEBCO bathymetry', GEBCO_WMS, 'GEBCO_LATEST', '', {
+  wms('depth-gebco', 'GEBCO bathymetry', GEBCO_WMS, 'GEBCO_LATEST', {
     maxzoom: 12,
     attribution: GEBCO_ATTR,
     group: GEBCO_GROUP
   }),
   // The same grid rendered flat rather than shaded, which stays legible with overlays stacked on it.
-  wms('depth-gebco-color', 'Color elevation', GEBCO_WMS, 'GEBCO_LATEST_2', '', {
+  wms('depth-gebco-color', 'Color elevation', GEBCO_WMS, 'GEBCO_LATEST_2', {
     maxzoom: 12,
     attribution: GEBCO_ATTR,
     group: GEBCO_GROUP
   }),
   // Measured soundings only, with the interpolated cells left out: the quality facet of a global
   // grid that is mostly interpolation.
-  wms('depth-gebco-measured', 'Measured data only', GEBCO_WMS, 'GEBCO_LATEST_3', '', {
+  wms('depth-gebco-measured', 'Measured data only', GEBCO_WMS, 'GEBCO_LATEST_3', {
     maxzoom: 12,
     attribution: GEBCO_ATTR,
     group: GEBCO_GROUP
   }),
-  wms('depth-emodnet', 'EMODnet bathymetry', EMODNET_WMS, 'emodnet:mean_multicolour', '', {
+  wms('depth-emodnet', 'EMODnet bathymetry', EMODNET_WMS, 'emodnet:mean_multicolour', {
     maxzoom: 12,
     bounds: EMODNET_DTM_BOUNDS,
     coverage: EMODNET_DTM_COVERAGE,
     attribution: EMODNET_BATHY_ATTR,
     group: EMODNET_GROUP
   }),
-  wms('depth-emodnet-quality', 'Quality index', EMODNET_WMS, 'emodnet:quality_index', 'quality_index_combined', {
+  wms('depth-emodnet-quality', 'Quality index', EMODNET_WMS, 'emodnet:quality_index', {
+    styles: 'quality_index_combined',
     maxzoom: 12,
     bounds: EMODNET_FACET_BOUNDS,
     coverage: EMODNET_DTM_COVERAGE,
@@ -254,7 +261,7 @@ const SOURCES: ChartSource[] = [
   }),
   // Generalized depth contours over the same DTM, the closest thing to chart-style depth lines that
   // is free and keyless outside the ENC services.
-  wms('depth-emodnet-contours', 'Depth contours', EMODNET_WMS, 'emodnet:contours', '', {
+  wms('depth-emodnet-contours', 'Depth contours', EMODNET_WMS, 'emodnet:contours', {
     maxzoom: 12,
     bounds: EMODNET_FACET_BOUNDS,
     coverage: EMODNET_DTM_COVERAGE,
@@ -280,19 +287,20 @@ const SOURCES: ChartSource[] = [
         'https://nowcoast.noaa.gov/geoserver/gwc/service/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=bluetopo:bathymetry&STYLE=&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png8'
     }
   },
-  wms('depth-bluetopo-uncertainty', 'Uncertainty', BLUETOPO_WMS, 'bathymetry', 'nbs_uncertainty', {
+  wms('depth-bluetopo-uncertainty', 'Uncertainty', BLUETOPO_WMS, 'bathymetry', {
+    styles: 'nbs_uncertainty',
     maxzoom: 16,
     bounds: BLUETOPO_BOUNDS,
     attribution: BLUETOPO_ATTR,
     group: BLUETOPO_GROUP
   }),
-  wms('depth-noaa-enc', 'NOAA ENC', NOAA_ENC_WMS, '0,1,2,3,4,5,6,7,10', '', {
+  wms('depth-noaa-enc', 'NOAA ENC', NOAA_ENC_WMS, '0,1,2,3,4,5,6,7,10', {
     bounds: NOAA_ENC_BOUNDS,
     coverage: NOAA_ENC_COVERAGE,
     attribution: NOAA_ENC_ATTR,
     group: NOAA_ENC_GROUP
   }),
-  wms('depth-noaa-enc-quality', 'Data quality (ZOC)', NOAA_ENC_WMS, '8,9', '', {
+  wms('depth-noaa-enc-quality', 'Data quality (ZOC)', NOAA_ENC_WMS, '8,9', {
     bounds: NOAA_ENC_BOUNDS,
     coverage: NOAA_ENC_COVERAGE,
     attribution: NOAA_ENC_ATTR,
@@ -340,56 +348,56 @@ const SOURCES: ChartSource[] = [
   // The Marine Regions layers are worldwide and served from generalized polygons, so they keep the
   // helper's chart-display ceiling: the renderer draws a crisp line at any zoom and none of them is
   // time-dynamic, so a deep zoom costs one tile rather than one tile every few minutes.
-  wms('bound-eez', 'Maritime boundaries', MARINE_REGIONS_WMS, 'eez_boundaries', '', {
+  wms('bound-eez', 'Maritime boundaries', MARINE_REGIONS_WMS, 'eez_boundaries', {
     attribution: VLIZ_ATTR
   }),
-  wms('bound-12nm', 'Territorial sea (12 nm)', MARINE_REGIONS_WMS, 'eez_12nm', '', {
+  wms('bound-12nm', 'Territorial sea (12 nm)', MARINE_REGIONS_WMS, 'eez_12nm', {
     attribution: VLIZ_ATTR
   }),
-  wms('bound-24nm', 'Contiguous zone (24 nm)', MARINE_REGIONS_WMS, 'eez_24nm', '', {
+  wms('bound-24nm', 'Contiguous zone (24 nm)', MARINE_REGIONS_WMS, 'eez_24nm', {
     attribution: VLIZ_ATTR
   }),
-  wms('bound-high-seas', 'High seas', MARINE_REGIONS_WMS, 'high_seas', '', {
+  wms('bound-high-seas', 'High seas', MARINE_REGIONS_WMS, 'high_seas', {
     attribution: VLIZ_ATTR
   }),
   // IHO S-23 sea areas: what body of water the boat is actually in.
-  wms('bound-iho', 'Sea areas (IHO)', MARINE_REGIONS_WMS, 'iho', '', {
+  wms('bound-iho', 'Sea areas (IHO)', MARINE_REGIONS_WMS, 'iho', {
     attribution: VLIZ_ATTR
   }),
-  wms('mpa-emodnet', 'Marine protected areas', EMODNET_HA_WMS, 'marineprotectedareas', '', {
+  wms('mpa-emodnet', 'Marine protected areas', EMODNET_HA_WMS, 'marineprotectedareas', {
     bounds: EMODNET_MPA_BOUNDS,
     attribution: EMODNET_HA_ATTR,
     group: EMODNET_MPA_GROUP
   }),
-  wms('mpa-natura2000', 'Natura 2000', EMODNET_HA_WMS, 'natura2000areas', '', {
+  wms('mpa-natura2000', 'Natura 2000', EMODNET_HA_WMS, 'natura2000areas', {
     bounds: NATURA_2000_BOUNDS,
     attribution: EMODNET_HA_ATTR,
     group: EMODNET_MPA_GROUP
   }),
   // The only worldwide protected-area layer in the catalog; the other three are EU or US only.
-  wms('mpa-unesco', 'UNESCO marine sites', MARINE_REGIONS_WMS, 'worldheritagemarineprogramme', '', {
+  wms('mpa-unesco', 'UNESCO marine sites', MARINE_REGIONS_WMS, 'worldheritagemarineprogramme', {
     attribution: VLIZ_ATTR
   }),
   // Seabed infrastructure: what an anchor must not land on. Advertised envelopes, which for the two
   // cable layers really are near worldwide.
-  wms('infra-power-cables', 'Power cables', EMODNET_HA_WMS, 'powercables', '', {
+  wms('infra-power-cables', 'Power cables', EMODNET_HA_WMS, 'powercables', {
     bounds: [-151.77, -22.33, 166.47, 71.04],
     attribution: EMODNET_HA_ATTR
   }),
-  wms('infra-telecom-cables', 'Telecom cables', EMODNET_HA_WMS, 'telecablesactual', '', {
+  wms('infra-telecom-cables', 'Telecom cables', EMODNET_HA_WMS, 'telecablesactual', {
     bounds: [-178.21, -33.82, 178.98, 61.51],
     attribution: EMODNET_HA_ATTR
   }),
-  wms('infra-pipelines', 'Pipelines', EMODNET_HA_WMS, 'pipelines', '', {
+  wms('infra-pipelines', 'Pipelines', EMODNET_HA_WMS, 'pipelines', {
     bounds: [-11.06, 36.0, 28.14, 71.57],
     attribution: EMODNET_HA_ATTR
   }),
-  wms('infra-wind-farms', 'Wind farms', EMODNET_HA_WMS, 'windfarmspoly', '', {
+  wms('infra-wind-farms', 'Wind farms', EMODNET_HA_WMS, 'windfarmspoly', {
     bounds: [-16.59, 27.73, 24.74, 65.47],
     attribution: EMODNET_HA_ATTR
   }),
   // Monthly AIS density on a 1 km grid, so it stops well short of the chart-display ceiling.
-  wms('traffic-vessel-density', 'Vessel density', EMODNET_HA_WMS, 'vesseldensity_all', '', {
+  wms('traffic-vessel-density', 'Vessel density', EMODNET_HA_WMS, 'vesseldensity_all', {
     maxzoom: 10,
     bounds: [-87.71, 14.96, 97.63, 85.0],
     attribution: EMODNET_HA_ATTR
@@ -415,12 +423,12 @@ const SOURCES: ChartSource[] = [
   radar('weather-radar-caribbean', 'Caribbean weather radar', 'caribbean', [-90.0, 9.996, -60.004, 25.0]),
   // No time dimension on either of the next two: the service serves the current state by design, so
   // an omitted TIME is already the answer rather than a default that could drift.
-  wms('weather-tropical', 'Active tropical cyclones', NOWCOAST_WMS, 'tropical_cyclones:active_tropical_cyclones', '', {
+  wms('weather-tropical', 'Active tropical cyclones', NOWCOAST_WMS, 'tropical_cyclones:active_tropical_cyclones', {
     maxzoom: 10,
     maxAgeSeconds: CYCLONE_MAX_AGE_SECONDS,
     attribution: NOWCOAST_CYCLONE_ATTR
   }),
-  wms('weather-alerts-us', 'NWS watches and warnings', NOWCOAST_WMS, 'alerts:watches_warnings_advisories', '', {
+  wms('weather-alerts-us', 'NWS watches and warnings', NOWCOAST_WMS, 'alerts:watches_warnings_advisories', {
     maxzoom: 10,
     maxAgeSeconds: ALERTS_MAX_AGE_SECONDS,
     attribution: NOWCOAST_ALERTS_ATTR
@@ -430,7 +438,6 @@ const SOURCES: ChartSource[] = [
     'Sea surface temperature',
     NOWCOAST_WMS,
     'sea_surface_temperature:global_sea_surface_temperature',
-    '',
     {
       maxzoom: 8,
       bounds: [-180, -85, 180, 85],
@@ -474,6 +481,8 @@ const SOURCES: ChartSource[] = [
 ]
 
 function deepFreeze<T>(value: T): T {
+  // Functions freeze too: validation does not forbid an extra function-valued property, and a
+  // mutable one would be a writable hole in an otherwise immutable catalog.
   const freezable = value !== null && (typeof value === 'object' || typeof value === 'function')
   if (freezable && !Object.isFrozen(value)) {
     // Freeze before recursing so a cyclic reference cannot recurse forever.
