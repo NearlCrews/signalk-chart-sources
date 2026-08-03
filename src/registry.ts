@@ -150,14 +150,15 @@ const NOWCOAST_CYCLONE_ATTR = 'NOAA/NWS/NHC nowCOAST, tropical cyclone forecast 
 const NOWCOAST_ALERTS_ATTR = 'NOAA/NWS nowCOAST, watches, warnings, and advisories'
 const NOWCOAST_SST_ATTR = 'NOAA nowCOAST, GHRSST sea surface temperature'
 // Verbatim, fetched from https://tiles.openwaters.io/seascape/vector.json's and raster.json's
-// identical attribution fields on 2026-08-01, trailing space included (mirrors Binnacle's own copy
+// identical attribution fields on 2026-08-02, trailing space included (mirrors Binnacle's own copy
 // in src/features/depth-charts/seascape-sources.ts; re-fetch and update both if Seascape's own
-// attribution text changes). Upstream shortened this on or before 2026-08-01, dropping the roughly
-// twenty-five underlying dataset credits it used to inline and moving them behind the license link
-// this anchor points at. Transcribed rather than kept, because the catalog credits what the service
-// says it serves; check-upstreams.ts compares this against the live TileJSON on every run.
+// attribution text changes). Upstream has shortened this twice: first dropping the roughly
+// twenty-five underlying dataset credits behind the license link this anchor points at, then on or
+// before 2026-08-02 shortening the company name itself. Transcribed rather than kept, because the
+// catalog credits what the service says it serves; check-upstreams.ts compares this against the
+// live TileJSON on every run.
 // cspell:disable -- verbatim upstream attribution; never edit it to satisfy a dictionary
-const SEASCAPE_ATTR = '<a href="https://openwaters.io/charts/seascape#license">© Open Water Software, LLC</a> '
+const SEASCAPE_ATTR = '<a href="https://openwaters.io/charts/seascape#license">© Open Waters</a> '
 // cspell:enable
 
 // Group descriptors shared by a source and its facet, named so the group id cannot diverge between
@@ -312,7 +313,7 @@ const SOURCES: ChartSource[] = [
     title: 'Seascape depth shading',
     tileSize: 512,
     minzoom: 0,
-    maxzoom: 17,
+    maxzoom: 18,
     fallbackTileBytes: 1_000_000,
     attribution: SEASCAPE_ATTR,
     upstream: {
@@ -326,7 +327,7 @@ const SOURCES: ChartSource[] = [
     title: 'Seascape bathymetry vector',
     tileSize: 256,
     minzoom: 0,
-    maxzoom: 14,
+    maxzoom: 15,
     fallbackTileBytes: 750_000,
     attribution: SEASCAPE_ATTR,
     upstream: {
