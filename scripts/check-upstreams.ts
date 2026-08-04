@@ -10,6 +10,7 @@ import {
   tileForLngLat,
   webMercatorTileBounds
 } from '../src/index.js'
+import { checkedPublicHttpsUrl } from './upstream-url.js'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -66,22 +67,14 @@ function parseXml(input: Uint8Array | string, label: string): RecordValue {
   return record(parsed, label)
 }
 
-function checkedHttpsUrl(value: string, base?: string): URL {
-  const url = new URL(value, base)
-  assert.equal(url.protocol, 'https:', `${url} must use HTTPS`)
-  assert.equal(url.username, '', `${url} must not include credentials`)
-  assert.equal(url.password, '', `${url} must not include credentials`)
-  return url
-}
-
 async function fetchBytesOnce(url: string): Promise<{ response: Response; bytes: Uint8Array }> {
-  checkedHttpsUrl(url)
+  checkedPublicHttpsUrl(url)
   const response = await fetch(url, {
     headers: { 'user-agent': USER_AGENT },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   })
   assert.ok(response.ok, `${url} returned HTTP ${response.status}`)
-  checkedHttpsUrl(response.url)
+  checkedPublicHttpsUrl(response.url)
   // Number(null) is 0, which is finite, so testing the converted value alone would silently pass
   // every response that omits the header.
   const declaredLength = response.headers.get('content-length')
@@ -206,19 +199,19 @@ async function discoverStyleHosts(styleUrl: string): Promise<Set<string>> {
   const visitedTileJson = new Set<string>()
 
   const inspectTileJson = async (candidate: string, base: string): Promise<void> => {
-    const url = checkedHttpsUrl(candidate, base)
+    const url = checkedPublicHttpsUrl(candidate, base)
     hosts.add(url.hostname.toLowerCase())
     if (visitedTileJson.has(url.href)) return
     visitedTileJson.add(url.href)
     const { json: tileJson, finalUrl } = await fetchJson(url.href, 'TileJSON')
     hosts.add(finalUrl.hostname.toLowerCase())
     for (const tile of strings(tileJson['tiles'])) {
-      hosts.add(checkedHttpsUrl(tile, finalUrl.href).hostname.toLowerCase())
+      hosts.add(checkedPublicHttpsUrl(tile, finalUrl.href).hostname.toLowerCase())
     }
   }
 
   const inspectStyle = async (candidate: string, base?: string): Promise<void> => {
-    const url = checkedHttpsUrl(candidate, base)
+    const url = checkedPublicHttpsUrl(candidate, base)
     hosts.add(url.hostname.toLowerCase())
     if (visitedStyles.has(url.href)) return
     visitedStyles.add(url.href)
@@ -226,7 +219,7 @@ async function discoverStyleHosts(styleUrl: string): Promise<Set<string>> {
     hosts.add(finalUrl.hostname.toLowerCase())
     const references = collectStyleReferences(style)
     for (const resource of references.resources) {
-      hosts.add(checkedHttpsUrl(resource, finalUrl.href).hostname.toLowerCase())
+      hosts.add(checkedPublicHttpsUrl(resource, finalUrl.href).hostname.toLowerCase())
     }
     await Promise.all([
       ...references.tileJson.map((tileJson) => inspectTileJson(tileJson, finalUrl.href)),
@@ -263,7 +256,7 @@ async function checkSource(source: ChartSource): Promise<void> {
  */
 async function fetchJson(url: string, label: string): Promise<{ json: RecordValue; finalUrl: URL }> {
   const { response, bytes } = await fetchBytes(url)
-  const finalUrl = checkedHttpsUrl(response.url)
+  const finalUrl = checkedPublicHttpsUrl(response.url)
   assert.match(response.headers.get('content-type') ?? '', /json/i, `${finalUrl} content type drifted`)
   const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
   return { json: record(parsed, `${finalUrl} ${label}`), finalUrl }
@@ -437,7 +430,7 @@ async function checkWmsCapabilities(sources: readonly ChartSource[]): Promise<vo
 
 /** The template with its tokens zeroed: a valid URL whose query still names the configured layer. */
 function zeroedTemplateUrl(template: string): URL {
-  return checkedHttpsUrl(template.replaceAll('{z}', '0').replaceAll('{x}', '0').replaceAll('{y}', '0'))
+  return checkedPublicHttpsUrl(template.replaceAll('{z}', '0').replaceAll('{x}', '0').replaceAll('{y}', '0'))
 }
 
 function wmtsCapabilitiesUrl(configured: URL): string {

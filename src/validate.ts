@@ -193,7 +193,7 @@ const isLoopbackName = (hostname: string): boolean =>
  * request time, and a public name can resolve (or rebind) to a private address, so the consuming
  * server must check the resolved IP as well. This is the definition-time half of that pair.
  */
-function assertPublicHost(hostname: string, label: string): void {
+export function assertPublicHost(hostname: string, label: string): void {
   // The URL parser brackets an IPv6 literal, so the opening bracket identifies the whole family.
   if (hostname.startsWith('[') || IPV4_LITERAL.test(hostname)) {
     throw new TypeError(`${label} must name a host, not an IP address literal`)
