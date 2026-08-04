@@ -6,3 +6,4 @@ package/
 .cave/
 .claude/
 .remember/
+.ruff_cache/

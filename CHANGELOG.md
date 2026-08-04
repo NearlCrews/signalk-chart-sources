@@ -9,6 +9,19 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-04
+
+### Fixed
+
+- The scheduled upstream monitor now rejects loopback names and IP address literals for both initial
+  requests and redirect destinations, matching the public-host rule applied to catalog URLs.
+- README links to repository-only contributor, release, and security documents now resolve from the
+  published npm package page.
+
+### Changed
+
+- Refreshed compatible development dependencies, and explicitly ignored Ruff's local cache.
+
 ## [0.7.1] - 2026-08-02
 
 ### Added
@@ -358,7 +371,8 @@ drift. Data and pure helpers only: no MapLibre, no Signal K, and no Node or brow
   Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
   re-validation agrees with the panel estimate. Unknown source ids are skipped.
 
-[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.5.0...v0.6.0

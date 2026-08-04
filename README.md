@@ -290,14 +290,17 @@ and dependency audits. Run `npm run verify:commit` for the fast repository-quali
 Run it when catalog or monitor behavior changes. It is scheduled separately and intentionally excluded
 from pull-request CI so an upstream outage does not block unrelated development.
 
-See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for contributor expectations and
-[RELEASING.md](RELEASING.md) for the approval-gated release process.
+See the
+[contributor guide](https://github.com/NearlCrews/signalk-chart-sources/blob/main/.github/CONTRIBUTING.md)
+for contributor expectations and the
+[release guide](https://github.com/NearlCrews/signalk-chart-sources/blob/main/RELEASING.md) for the
+approval-gated release process.
 
 ## Safety and security
 
 Chart data is advisory and must not be the sole means of navigation. See the
-[security policy](.github/SECURITY.md) for input-validation, dependency, disclosure, and marine-safety
-guidance.
+[security policy](https://github.com/NearlCrews/signalk-chart-sources/blob/main/.github/SECURITY.md)
+for input-validation, dependency, disclosure, and marine-safety guidance.
 
 ## License
 
