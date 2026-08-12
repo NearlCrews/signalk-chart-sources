@@ -133,7 +133,7 @@ const NOAA_MPA_BOUNDS: LngLatBbox = [-180, -16, 180, 76]
 
 // Attribution strings shared by more than one source, named so a correction cannot land on one copy
 // and miss the other.
-const GEBCO_ATTR = 'GEBCO_2024 Grid, GEBCO Compilation Group (2024)'
+const GEBCO_ATTR = 'GEBCO_2025 Grid, GEBCO Compilation Group (2025)'
 // Both basemaps are the same tileset and the same terms, rendered light and dark, so a corrected
 // credit or a moved host must not be able to land on one and miss the other.
 const OPENMAPTILES_ATTR = '© OpenMapTiles, © OpenStreetMap contributors'

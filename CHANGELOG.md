@@ -9,6 +9,10 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- Update the GEBCO attribution to the 2025 grid now served by the upstream WMS.
+
 ## [0.7.2] - 2026-08-04
 
 ### Fixed
