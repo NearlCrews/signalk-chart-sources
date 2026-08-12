@@ -58,6 +58,7 @@ test('key sources pin their transcribed upstream data (drift guard)', () => {
   assert.ok(gebco.upstream.mode === 'wms')
   assert.equal(gebco.upstream.base, 'https://wms.gebco.net/mapserv')
   assert.equal(gebco.upstream.layers, 'GEBCO_LATEST')
+  assert.equal(gebco.attribution, 'GEBCO_2025 Grid, GEBCO Compilation Group (2025)')
   const enc = src('depth-noaa-enc')
   assert.ok(enc.upstream.mode === 'wms')
   assert.equal(enc.upstream.layers, '0,1,2,3,4,5,6,7,10')
