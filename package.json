@@ -76,7 +76,7 @@
     "cspell": "10.0.1",
     "fast-xml-parser": "5.10.1",
     "knip": "6.32.0",
-    "markdownlint-cli2": "0.23.2",
+    "markdownlint-cli2": "0.23.3",
     "publint": "0.3.23",
     "tsx": "4.23.11",
     "typescript": "7.0.2",
