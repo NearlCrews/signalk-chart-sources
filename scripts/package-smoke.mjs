@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import { EXPECTED_EXPORTS } from './expected-exports.mjs'
+
+const execFileAsync = promisify(execFile)
 
 const temp = mkdtempSync(join(tmpdir(), 'signalk-chart-sources-pack-'))
 const requestedDestination = process.argv[2]
@@ -11,14 +14,20 @@ const packDestination = requestedDestination === undefined ? temp : resolve(requ
 const consumer = join(temp, 'consumer')
 
 /**
- * Run a child quietly but report it loudly. A bare execFileSync failure prints only "Command
- * failed" and leaves the actual diagnostic buffered on the error object as raw Buffers.
+ * Run a child quietly but report it loudly. A bare execFile failure prints only "Command failed" and
+ * leaves the actual diagnostic buffered on the error object.
+ *
+ * @param {string} command
+ * @param {string[]} args
+ * @param {{ cwd?: string }} [options]
+ * @returns {Promise<string>}
  */
-function run(command, args, options = {}) {
+async function run(command, args, options = {}) {
   try {
-    return execFileSync(command, args, { stdio: 'pipe', encoding: 'utf8', ...options })
+    return (await execFileAsync(command, args, { encoding: 'utf8', ...options })).stdout
   } catch (error) {
-    const detail = [error.stdout, error.stderr]
+    const output = /** @type {{ stdout?: unknown, stderr?: unknown }} */ (error)
+    const detail = [output.stdout, output.stderr]
       .map((part) => String(part ?? '').trim())
       .filter(Boolean)
       .join('\n')
@@ -26,18 +35,36 @@ function run(command, args, options = {}) {
   }
 }
 
+/**
+ * The compilers a consumer realistically type-checks the declarations with. The default `tsc` bin
+ * must stay TypeScript 7; TypeScript 6 is aliased as `typescript6` because both known consumers
+ * still run TypeScript 6 tooling, and its own `tsc` bin loses the link to TypeScript 7's. Both bins
+ * are Node.js scripts, run with this Node.js.
+ */
+const COMPILERS = [
+  { label: 'TypeScript 7', bin: join(process.cwd(), 'node_modules/.bin/tsc'), version: /^Version 7\./ },
+  { label: 'TypeScript 6', bin: join(process.cwd(), 'node_modules/typescript6/bin/tsc'), version: /^Version 6\./ }
+]
+
+/** Node-style resolution, and the bundler resolution Binnacle's Vite build uses. */
+const RESOLUTIONS = [
+  ['--module', 'NodeNext', '--moduleResolution', 'NodeNext'],
+  ['--module', 'ESNext', '--moduleResolution', 'Bundler']
+]
+
 try {
   mkdirSync(packDestination, { recursive: true })
   mkdirSync(consumer)
   const existingTarballs = readdirSync(packDestination).filter((name) => name.endsWith('.tgz'))
   assert.deepEqual(existingTarballs, [], `pack destination already contains tarballs: ${existingTarballs.join(', ')}`)
 
-  // Skip the prepare rebuild: every caller builds first, and the tarball must reflect that exact
-  // dist. npm can print lifecycle banners before the JSON report even with scripts ignored, so
-  // slice from the array start.
-  const packOutput = run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', packDestination])
+  // Every caller builds first, and the tarball must reflect that exact dist, so no lifecycle script
+  // may run. npm 10 still prints a lifecycle banner before the JSON report for a prepare script even
+  // with scripts ignored, so slice from the array start rather than trusting the first byte.
+  const packOutput = await run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', packDestination])
   const reportStart = packOutput.indexOf('[')
   assert.ok(reportStart >= 0, `npm pack produced no JSON report: ${packOutput}`)
+  /** @type {Array<{ filename: string, files: Array<{ path: string }> }>} */
   const packed = JSON.parse(packOutput.slice(reportStart))
   assert.equal(packed.length, 1, `npm pack produced ${packed.length} reports`)
   const result = packed[0]
@@ -64,15 +91,15 @@ try {
   )
 
   const tarball = join(packDestination, result.filename)
-  run(join(process.cwd(), 'node_modules/.bin/publint'), ['run', tarball, '--strict'])
+  await run(join(process.cwd(), 'node_modules/.bin/publint'), ['run', tarball, '--strict'])
 
   writeFileSync(join(consumer, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
-  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], { cwd: consumer })
+  await run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], { cwd: consumer })
   const installedPackage = JSON.parse(
     readFileSync(join(consumer, 'node_modules/signalk-chart-sources/package.json'), 'utf8')
   )
   assert.ok(installedPackage.exports?.['.']?.types)
-  run(
+  await run(
     process.execPath,
     [
       '--input-type=module',
@@ -103,6 +130,7 @@ try {
     [
       'import {',
       '  chartSourceById,',
+      '  coversBbox,',
       '  estimateBytes,',
       '  expandUpstreamUrl,',
       '  iterateTilesInBbox,',
@@ -125,33 +153,40 @@ try {
       "const mode: UpstreamTemplate['mode'] = source.upstream.mode",
       'const group: ChartGroup | undefined = source.group',
       'const count: number = tileCountInBbox(source, bbox, zooms)',
+      'const covered: boolean = coversBbox(source, bbox, zooms)',
       'const meters: MercatorBbox = webMercatorTileBounds(0, 0, 0)',
       'const url: string = expandUpstreamUrl(source, 0, 0, 0)',
       'const bytes: number = estimateBytes([source.id], bbox, zooms, {})',
       'const first: ZXY | undefined = [...iterateTilesInBbox(source, bbox, zooms, options)][0]',
-      'void [mode, group, count, meters, url, bytes, first]'
+      'void [mode, group, count, covered, meters, url, bytes, first]'
     ].join('\n')
   )
-  // The consumer compatibility floor: the toolchain a plain Node 22 consumer compiles with,
-  // deliberately pinned rather than read from tsconfig.json so a library target bump cannot raise
-  // the floor without this check flagging it.
-  run(
-    join(process.cwd(), 'node_modules/.bin/tsc'),
-    [
-      '--noEmit',
-      '--strict',
-      '--target',
-      'ES2023',
-      '--module',
-      'NodeNext',
-      '--moduleResolution',
-      'NodeNext',
-      join(consumer, 'smoke.ts')
-    ],
-    { cwd: consumer }
+  // The consumer compatibility floor: the compilers and resolution modes a Node 22 or bundler
+  // consumer compiles with, deliberately pinned rather than read from tsconfig.json so a library
+  // target bump cannot raise the floor without this check flagging it. The compiles are independent,
+  // so they run at once.
+  /**
+   * @param {{ bin: string }} compiler
+   * @param {string[]} args
+   */
+  const tsc = (compiler, args) => run(process.execPath, [compiler.bin, ...args], { cwd: consumer })
+  const versions = await Promise.all(
+    COMPILERS.map(async (compiler) => {
+      const version = (await tsc(compiler, ['--version'])).trim()
+      assert.match(version, compiler.version, `${compiler.label} resolved to ${version}`)
+      return version.replace(/^Version /, 'TypeScript ')
+    })
+  )
+  await Promise.all(
+    COMPILERS.flatMap((compiler) =>
+      RESOLUTIONS.map((resolution) =>
+        tsc(compiler, ['--noEmit', '--strict', '--target', 'ES2023', ...resolution, join(consumer, 'smoke.ts')])
+      )
+    )
   )
   console.log(
-    `package smoke passed for ${result.filename}: ${result.files.length} files, ${EXPECTED_EXPORTS.length} exports`
+    `package smoke passed for ${result.filename}: ${result.files.length} files, ${EXPECTED_EXPORTS.length} ` +
+      `exports, declarations checked with ${versions.join(' and ')} under NodeNext and Bundler resolution`
   )
 } finally {
   rmSync(temp, { recursive: true, force: true })

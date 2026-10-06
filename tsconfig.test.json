@@ -5,9 +5,14 @@
   "compilerOptions": {
     "rootDir": ".",
     "noEmit": true,
-    // The maintenance scripts are plain JavaScript. allowJs lets the tests import the shared export
-    // list from one of them; checkJs stays off, so those files are resolved but not type-checked.
-    "allowJs": true
+    // The .mjs maintenance scripts run on bare node, so they stay plain JavaScript with JSDoc types.
+    // allowJs brings them into this program and checkJs holds them to the same strict checks as the
+    // TypeScript scripts and tests.
+    "allowJs": true,
+    "checkJs": true,
+    // Declaration isolation guards the published declarations, which only the build config emits. It
+    // also cannot be combined with allowJs.
+    "isolatedDeclarations": false
   },
   // src is not re-listed: the build config already checks it as roots, and every src file these
   // roots import is still fully checked as part of this program.
