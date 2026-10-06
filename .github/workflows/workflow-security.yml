@@ -1,0 +1,61 @@
+# Workflow security: check every workflow's syntax and expressions with actionlint, and audit the
+# workflows and the Dependabot configuration with zizmor. Runs when either changes, and weekly so
+# newly published zizmor audits reach unchanged workflows too.
+
+name: Workflow security
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          # Nothing here has a go.sum to key a cache on, and the module download is verified against
+          # the Go checksum database on every run.
+          cache: false
+      # go run rather than a downloaded release binary: the Go checksum database verifies the source.
+      - name: Check workflow syntax and expressions
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Audit workflow security
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          # Report in the log rather than through code scanning, which would need a write token.
+          advanced-security: false
+          online-audits: false

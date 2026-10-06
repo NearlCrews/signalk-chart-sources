@@ -14,39 +14,56 @@ concurrency:
 
 jobs:
   check:
+    name: Check upstream services
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      report: ${{ steps.monitor.outputs.report }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run test:upstreams
+      # The monitor writes its bounded, fenced failure report to the step summary and to this step's
+      # output.
+      - id: monitor
+        run: npm run test:upstreams
 
   # Issue write access lives in its own job, so the job that installs dependencies and parses
   # untrusted capability documents stays read-only. This job checks out nothing and runs no
-  # project code.
+  # project code. It tracks main only: a run dispatched from another branch must not open, comment
+  # on, or close the issue that describes main.
   track:
+    name: Track drift in an issue
     needs: check
-    if: always()
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-      issues: write
+      issues: write # open, comment on, and close the drift tracking issue
     steps:
       - name: Open, update, or close the drift tracking issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           CHECK_RESULT: ${{ needs.check.result }}
+          # The report quotes upstream responses. It reaches the script only as data in the
+          # environment, never interpolated into the script itself.
+          REPORT: ${{ needs.check.outputs.report }}
         with:
           script: |
             const title = 'Upstream monitor failure'
+            const marker = '<!-- upstream-monitor-report -->'
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            // The monitor fences its report, so links and mentions in upstream text stay inert here.
+            const report = (process.env.REPORT ?? '').trim()
+            // Anyone can open an issue or comment, so only what this workflow wrote counts: an
+            // outsider's issue with the same title, or a comment copying the report, is ignored.
+            const ownedByWorkflow = (item) => item.user?.login === 'github-actions[bot]'
             // Paginate and skip pull requests: listForRepo returns both, and one page is not enough
             // to conclude the tracking issue is absent.
             const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -54,15 +71,35 @@ jobs:
               state: 'open',
               per_page: 100
             })
-            const existing = issues.find((issue) => !issue.pull_request && issue.title === title)
+            const existing = issues.find(
+              (issue) => !issue.pull_request && issue.title === title && ownedByWorkflow(issue)
+            )
 
             if (process.env.CHECK_RESULT !== 'success') {
-              const body = `The scheduled upstream monitor failed. See ${runUrl} for every drifted source.`
-              if (existing) {
-                await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body })
-              } else {
+              const details =
+                report === ''
+                  ? 'The run recorded no check failures, so it most likely failed before the checks ran.'
+                  : report
+              const body = `The scheduled upstream monitor failed in ${runUrl}.\n\n${details}\n\n${marker}`
+              if (!existing) {
                 await github.rest.issues.create({ ...context.repo, title, body })
+                return
               }
+              // An unchanged report adds nothing to an issue that already says it, so skip it.
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                ...context.repo,
+                issue_number: existing.number,
+                per_page: 100
+              })
+              const previous = [existing, ...comments.filter(ownedByWorkflow)]
+                .map((item) => (item.body ?? '').replaceAll('\r\n', '\n'))
+                .filter((text) => text.includes(marker))
+                .at(-1)
+              if (report !== '' && previous?.includes(report)) {
+                core.info(`The failures match the last report on #${existing.number}; not commenting.`)
+                return
+              }
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body })
               return
             }
 
