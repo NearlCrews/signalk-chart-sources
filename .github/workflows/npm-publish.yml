@@ -13,17 +13,20 @@ concurrency:
 
 jobs:
   verify:
+    name: Verify the release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          cache: npm
+          # This job builds the tarball that gets published, so it restores nothing from a cache that
+          # other workflow runs can write.
+          package-manager-cache: false
 
       - name: Verify release tag
         env:
@@ -53,34 +56,46 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - run: npm run test:coverage
-      - run: npm audit
+      - run: npm run audit:full
       - run: npm run audit:runtime
       - name: Smoke-test the exact release tarball
         run: node scripts/package-smoke.mjs package
 
       - name: Preserve the verified tarball
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-package
           path: package/*.tgz
           if-no-files-found: error
 
   publish:
+    name: Publish to npm
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm
     permissions:
-      id-token: write
+      id-token: write # npm trusted publishing and provenance exchange this OIDC token to publish
       contents: read
     steps:
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
           package-manager-cache: false
-      - run: npm install --global npm@12.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Require npm with trusted publishing support
+        # The npm bundled with Node.js 24 publishes through OIDC; trusted publishing needs 11.5.1 or
+        # newer, so fail before the upload rather than fall back to a token that no longer exists.
+        run: |
+          node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number)
+            const supported = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)))
+            if (!supported) {
+              console.error("npm " + process.argv[1] + " predates trusted publishing, which needs 11.5.1")
+              process.exit(1)
+            }
+          ' "$(npm --version)"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: npm-package
           path: package

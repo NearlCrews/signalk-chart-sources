@@ -1,3 +1,6 @@
+# A cooldown holds each new release for a week before Dependabot proposes it. A compromised package
+# is usually caught and yanked within hours of publication, so waiting keeps this repository from
+# being an early consumer of a malicious version. Security updates are exempt by design.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -5,15 +8,15 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
+    # The package has no runtime dependencies by design, so development dependencies are the only
+    # group. Aliased packages such as typescript6 are not bumped by Dependabot and need a manual
+    # review.
     groups:
       dev-dependencies:
         dependency-type: development
-        update-types:
-          - minor
-          - patch
-      production-dependencies:
-        dependency-type: production
         update-types:
           - minor
           - patch
@@ -26,6 +29,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       actions:
