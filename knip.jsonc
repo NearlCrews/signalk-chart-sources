@@ -1,6 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "treatConfigHintsAsErrors": true,
+  // scripts/package-smoke.mjs runs publint by its bin path against the packed tarball, a call knip
+  // cannot trace back to the dependency.
+  "ignoreDependencies": ["publint"],
   "cycles": {
     "dynamicImports": true
   },
