@@ -1,7 +1,7 @@
 import { tileCountInBbox } from './mercator.js'
 import { chartSourceById } from './registry.js'
 import type { ChartSource, LngLatBbox, UpstreamTemplate, ZoomRange } from './types.js'
-import { assertSourceId } from './validate.js'
+import { assertLngLatBbox, assertRecord, assertZoomRange, checkedSource, describeValue } from './validate.js'
 
 /** Frozen first-download fallbacks keyed by upstream mode. A source-specific value takes priority. */
 export const DEFAULT_TILE_BYTES_BY_MODE: Readonly<Record<UpstreamTemplate['mode'], number>> = Object.freeze({
@@ -13,19 +13,16 @@ export const DEFAULT_TILE_BYTES_BY_MODE: Readonly<Record<UpstreamTemplate['mode'
 })
 
 /**
- * Resolve a catalog id or a supplied source to the source to price. Only the id is checked here, not
- * the whole shape: the id is all that has to be trustworthy before it reaches the dedupe set and the
- * averages lookup, and `tileCountInBbox` fully validates the source a few lines later. Validating
- * twice doubled the cost for a source carrying coverage regions.
+ * Resolve a catalog id or a supplied source to the validated snapshot to price. A supplied source is
+ * checked in full here, before its id reaches the dedupe set, so an invalid entry cannot hide behind
+ * an earlier one that shares its id. Every later read, the tile count included, sees the snapshot,
+ * which the counter recognizes rather than checking again.
  */
 function resolved(entry: string | ChartSource): ChartSource {
-  if (typeof entry !== 'string') {
-    assertSourceId((entry as { id?: unknown })?.id)
-    return entry
-  }
+  if (typeof entry !== 'string') return checkedSource(entry).source
   const known = chartSourceById(entry)
-  if (!known) throw new RangeError(`unknown chart source: ${entry}`)
-  return known
+  if (!known) throw new RangeError(`unknown chart source: ${describeValue(entry)}`)
+  return checkedSource(known).source
 }
 
 function validatedAverage(id: string, value: number): number {
@@ -54,6 +51,12 @@ export function estimateBytes(
   zoomRange: ZoomRange,
   perSourceAvgBytes: Readonly<Record<string, number>>
 ): number {
+  // Every input is checked up front, so an empty or fully deduplicated list still fails closed on a
+  // malformed box, zoom range, or averages table rather than quietly pricing nothing.
+  if (!Array.isArray(sources)) throw new TypeError('sources must be an array')
+  assertLngLatBbox(bbox)
+  assertZoomRange(zoomRange)
+  assertRecord(perSourceAvgBytes, 'perSourceAvgBytes')
   let total = 0
   const counted = new Set<string>()
   for (const entry of sources) {

@@ -1,15 +1,18 @@
 import type { ChartSource, LngLatBbox, MercatorBbox, TileEnumerationOptions, ZoomRange, ZXY } from './types.js'
 import {
-  assertFiniteNumber,
+  assertLngLat,
   assertLngLatBbox,
   assertTileCoordinate,
   assertZoom,
   assertZoomRange,
+  checkedSource,
   MAX_TILE_ZOOM,
-  validateChartSource
+  type PreparedSource,
+  splitValidBbox
 } from './validate.js'
 
-// Keep this formula and constant bit-exact with the Rust tile-cache container copy.
+// Keep ORIGIN and webMercatorTileBounds bit-exact with the Rust tile-cache container copy
+// (upstream.rs), and change both together.
 const ORIGIN = 20037508.342789244
 
 /** Return EPSG:3857 bounds for a valid XYZ tile, or throw RangeError for invalid coordinates. */
@@ -30,21 +33,28 @@ export const MAX_MERCATOR_LAT = 85.0511287798066
  * coordinate below this is floating-point residue from an edge that is mathematically zero, never a
  * genuine tile boundary. Derived rather than written as a literal so raising MAX_TILE_ZOOM moves it.
  */
-export const MIN_TILE_EDGE_METERS = (2 * ORIGIN) / 2 ** MAX_TILE_ZOOM
+export const MIN_TILE_EDGE_METERS: number = (2 * ORIGIN) / 2 ** MAX_TILE_ZOOM
+
+/** Degrees to radians as one multiplication, the form Rust's f64::to_radians uses. */
+const RADIANS_PER_DEGREE = Math.PI / 180
 
 /**
  * Return the integer XYZ tile containing a finite longitude-latitude point.
  * Latitude clamps to the Web Mercator limit, and finite longitude clamps to an edge tile.
  *
+ * Shares its formula and operation order with the Rust tile_for_lng_lat (geom.rs) but is not
+ * bit-exact with it: tan and asinh come from different math libraries, so on a point within a few
+ * ULPs of a tile boundary the two can pick neighboring tiles. A count from here and an enumeration
+ * there can therefore differ by the odd boundary tile.
+ *
  * @throws {RangeError} When a coordinate is not finite or the zoom is out of range.
  */
 export function tileForLngLat(lng: number, lat: number, z: number): Readonly<{ x: number; y: number }> {
-  assertFiniteNumber(lng, 'longitude')
-  assertFiniteNumber(lat, 'latitude')
+  assertLngLat(lng, lat)
   assertZoom(z)
   const n = 2 ** z
   const clampedLat = Math.max(-MAX_MERCATOR_LAT, Math.min(MAX_MERCATOR_LAT, lat))
-  const latRad = (clampedLat * Math.PI) / 180
+  const latRad = clampedLat * RADIANS_PER_DEGREE
   const xf = Math.floor(((lng + 180) / 360) * n)
   const yf = Math.floor(((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2) * n)
   const max = n - 1
@@ -58,52 +68,85 @@ type TileRange = Readonly<{ z: number; x0: number; x1: number; y0: number; y1: n
 
 export const DEFAULT_MAX_ENUMERATED_TILES = 1_000_000
 
-/** Split a box at the antimeridian without revalidating: for boxes a validator already accepted. */
-function splitValidBbox(bbox: LngLatBbox): LngLatBbox[] {
-  const [west, south, east, north] = bbox
-  if (west < east) return [[west, south, east, north]]
-  return [
-    [west, south, 180, north],
-    [-180, south, east, north]
-  ]
-}
-
-function splitBbox(bbox: LngLatBbox): LngLatBbox[] {
-  assertLngLatBbox(bbox)
-  return splitValidBbox(bbox)
-}
-
-function intersectBboxes(left: LngLatBbox, right: LngLatBbox): LngLatBbox | null {
+/**
+ * Intersect two boxes that do not cross the antimeridian, clamping latitude to plus or minus latLimit,
+ * or return null when nothing is left.
+ */
+function intersectBboxes(left: LngLatBbox, right: LngLatBbox, latLimit: number): LngLatBbox | null {
   const west = Math.max(left[0], right[0])
-  const south = Math.max(left[1], right[1], -MAX_MERCATOR_LAT)
+  const south = Math.max(left[1], right[1], -latLimit)
   const east = Math.min(left[2], right[2])
-  const north = Math.min(left[3], right[3], MAX_MERCATOR_LAT)
+  const north = Math.min(left[3], right[3], latLimit)
   return west < east && south < north ? [west, south, east, north] : null
 }
 
-function clipBboxes(source: ChartSource, bbox: LngLatBbox): LngLatBbox[] {
-  const requested = splitBbox(bbox)
-  const coverage = source.coverage ?? (source.bounds ? [source.bounds] : [[-180, -90, 180, 90] as const])
-  // validateChartSource already vetted every source box in coveredRanges, so the split skips a
-  // second per-box validation; only the caller-supplied request box above needs its own check.
-  const sourceBoxes = coverage.flatMap(splitValidBbox)
-  const intersections: LngLatBbox[] = []
-  for (const requestBox of requested) {
-    for (const sourceBox of sourceBoxes) {
-      const intersection = intersectBboxes(requestBox, sourceBox)
-      if (intersection) intersections.push(intersection)
-    }
-  }
-  return intersections
+const crossesAntimeridian = (box: LngLatBbox): boolean => box[0] > box[2]
+
+/**
+ * Split every box of a list that crosses the antimeridian, returning the list itself when none does,
+ * so a list that is already split passes through without a copy. Only west > east crosses: a box of
+ * zero width, which validation never accepts, stays whole rather than reading as a full wrap.
+ */
+function splitRegions(boxes: readonly LngLatBbox[]): readonly LngLatBbox[] {
+  return boxes.some(crossesAntimeridian)
+    ? boxes.flatMap((box) => (crossesAntimeridian(box) ? splitValidBbox(box) : [box]))
+    : boxes
 }
 
-// Not a ZoomRange: the clamped minimum can exceed the clamped maximum when a request falls entirely
-// outside the source's zooms, which coveredRanges reads as an empty result.
-function zoomBounds(source: ChartSource, zoomRange: ZoomRange): readonly [number, number] {
+/**
+ * Clip regions to a box, either of which may cross the antimeridian, dropping any region left empty.
+ * Both are taken as valid: the tile helpers validate the box first, and the catalog's clipped lists
+ * are validated as the catalog is built. The tile helpers clamp latitude to the Web Mercator limit,
+ * and one that only needs to know whether anything is left stops at the first clip. The catalog
+ * passes 90, clipping one region list to another without the projection's say.
+ */
+export function clipRegions(
+  regions: readonly LngLatBbox[],
+  bounds: LngLatBbox,
+  latLimit: number = MAX_MERCATOR_LAT,
+  maxClips: number = Number.POSITIVE_INFINITY
+): LngLatBbox[] {
+  const pieces = splitRegions(regions)
+  const clips: LngLatBbox[] = []
+  for (const outer of splitValidBbox(bounds)) {
+    for (const piece of pieces) {
+      const clip = intersectBboxes(outer, piece, latLimit)
+      if (clip === null) continue
+      clips.push(clip)
+      if (clips.length >= maxClips) return clips
+    }
+  }
+  return clips
+}
+
+/** The deepest zoom a source serves. vectorMaxzoom is validated to sit within its zoom range. */
+const zoomCeiling = (source: ChartSource): number => source.vectorMaxzoom ?? source.maxzoom
+
+/** Validate a zoom range and report whether it shares any zoom with those the source serves. */
+function servesAnyZoom(source: ChartSource, zoomRange: ZoomRange): boolean {
   assertZoomRange(zoomRange)
-  const [zmin, zmax] = zoomRange
-  // vectorMaxzoom is validated to sit within the zoom range, so whichever ceiling applies is one value.
-  return [Math.max(zmin, source.minzoom), Math.min(zmax, source.vectorMaxzoom ?? source.maxzoom)]
+  return zoomRange[0] <= zoomCeiling(source) && source.minzoom <= zoomRange[1]
+}
+
+type CoveredClips = Readonly<{ clips: readonly LngLatBbox[]; zmin: number; zmax: number }>
+
+/**
+ * The request box clipped to a source's regions, over the zooms both share, or null when either is
+ * empty. Both inputs are validated first, and the zooms are settled before any clipping they make
+ * unnecessary. maxClips stops the clipping early for a caller that only asks whether anything is left.
+ */
+function coveredClips(
+  prepared: PreparedSource,
+  bbox: LngLatBbox,
+  zoomRange: ZoomRange,
+  maxClips?: number
+): CoveredClips | null {
+  const { source, regions } = prepared
+  assertLngLatBbox(bbox)
+  if (!servesAnyZoom(source, zoomRange)) return null
+  const clips = clipRegions(regions, bbox, MAX_MERCATOR_LAT, maxClips)
+  if (clips.length === 0) return null
+  return { clips, zmin: Math.max(zoomRange[0], source.minzoom), zmax: Math.min(zoomRange[1], zoomCeiling(source)) }
 }
 
 function tileRange(clip: LngLatBbox, z: number): TileRange {
@@ -154,13 +197,11 @@ function disjointRanges(ranges: readonly TileRange[]): TileRange[] {
 }
 
 function coveredRanges(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): TileRange[] {
-  validateChartSource(source)
-  const clips = clipBboxes(source, bbox)
-  const [zmin, zmax] = zoomBounds(source, zoomRange)
-  if (zmin > zmax || clips.length === 0) return []
+  const covered = coveredClips(checkedSource(source), bbox, zoomRange)
+  if (covered === null) return []
   const ranges: TileRange[] = []
-  for (let z = zmin; z <= zmax; z++) {
-    for (const clip of clips) ranges.push(tileRange(clip, z))
+  for (let z = covered.zmin; z <= covered.zmax; z++) {
+    for (const clip of covered.clips) ranges.push(tileRange(clip, z))
   }
   return disjointRanges(ranges)
 }
@@ -191,6 +232,50 @@ function enumerationLimit(options: TileEnumerationOptions): number {
  */
 export function tileCountInBbox(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): number {
   return countRanges(coveredRanges(source, bbox, zoomRange))
+}
+
+/**
+ * Report whether a source covers any tile of the box within the zoom range: the same answer as
+ * tileCountInBbox(...) > 0, without building or counting ranges, and without the unsafe-total error a
+ * huge box at a deep zoom raises there. Every clip yields at least one tile at every zoom it spans,
+ * so a non-empty clip list and a non-empty zoom range are all it takes.
+ *
+ * @throws {TypeError | RangeError} When the source definition, the box, or the zoom range is invalid.
+ */
+export function coversBbox(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): boolean {
+  // One clip settles the answer, so the clipping stops at the first.
+  return coveredClips(checkedSource(source), bbox, zoomRange, 1) !== null
+}
+
+/**
+ * Report whether a point lies inside a source's coverage regions, or its bounds when it has no
+ * coverage, or anywhere for a worldwide source. Region edges are inclusive, and a region crossing the
+ * antimeridian is split there, so -180 and 180 both match an edge on that meridian. A finite point
+ * outside the drawable range, longitude beyond [-180, 180] or latitude past MAX_MERCATOR_LAT, lies in
+ * no tile and returns false rather than throwing.
+ *
+ * Without a zoom range the answer is about geography alone. With one, the range must also overlap the
+ * zooms the source serves, exactly as coversBbox requires, so a route check at a harbor zoom does not
+ * count a source whose tiles stop well short of it.
+ *
+ * @throws {TypeError | RangeError} When the source definition is invalid, a coordinate is not finite,
+ * or a zoom range is given and invalid.
+ */
+export function coversPoint(source: ChartSource, lng: number, lat: number, zoomRange?: ZoomRange): boolean {
+  const { source: checked, regions } = checkedSource(source)
+  assertLngLat(lng, lat)
+  if (zoomRange !== undefined && !servesAnyZoom(checked, zoomRange)) return false
+  if (lng < -180 || lng > 180 || Math.abs(lat) > MAX_MERCATOR_LAT) return false
+  // The two spellings of the antimeridian are one line, so a point on it lies in any region touching
+  // either. The regions are already split there, so each runs west to east. Indexed, so this hot
+  // per-point check allocates nothing.
+  const antimeridian = Math.abs(lng) === 180
+  for (let index = 0; index < regions.length; index++) {
+    const region = regions[index]
+    if (region === undefined || lat < region[1] || lat > region[3]) continue
+    if (antimeridian ? region[0] === -180 || region[2] === 180 : region[0] <= lng && lng <= region[2]) return true
+  }
+  return false
 }
 
 function* yieldRanges(ranges: readonly TileRange[]): Generator<ZXY, void, undefined> {

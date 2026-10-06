@@ -1,10 +1,13 @@
+import { clipRegions } from './mercator.js'
 import type { ChartGroup, ChartSource, LngLatBbox } from './types.js'
-import { validateChartSource, WMS_VERSION } from './validate.js'
+import { registerCatalogSource, WMS_VERSION } from './validate.js'
 
 // Every shared upstream, transcribed from the Binnacle chartplotter source modules so the webapp render
 // config and the companion proxy allowlist never drift. The webapp augments these with its UI-only
-// metadata (parent, region, category, opacity) by id. The NASA GIBS ocean fields are date-dynamic
-// (a {date} path segment) and require a future catalog design with daily re-push; they stay direct.
+// metadata (parent, region, category, opacity) by id. The NASA GIBS ocean fields the webapp still
+// requests directly are not blocked on a date token: GIBS accepts the literal time segment 'default'
+// and serves the latest day, so they could be plain time-dynamic XYZ sources here. That is a
+// candidate addition, not a commitment.
 
 const NOAA_ENC_WMS =
   'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer'
@@ -27,6 +30,12 @@ const ALERTS_MAX_AGE_SECONDS = 300
 const CYCLONE_MAX_AGE_SECONDS = 3600
 /** A daily analysis field, so six hours is still comfortably the current day's product. */
 const SST_MAX_AGE_SECONDS = 21_600
+
+// Catalog coverage derived from a wider list is clipped to its display envelope, because a renderer
+// never draws a layer outside its bounds, so a tile warmed there is wasted, and validation rejects
+// coverage that strays past bounds. The clip stops at the poles rather than the Web Mercator limit:
+// it clips data to data, not to a projection.
+const DATA_LAT_LIMIT = 90
 
 // EMODnet DTM coverage, derived 2026-08-01 by sampling the live emodnet:mean_multicolour layer on a
 // 2.5 degree grid across the service's advertised extent and keeping the cells that returned
@@ -52,52 +61,64 @@ const EMODNET_DTM_COVERAGE: readonly LngLatBbox[] = [
 const EMODNET_DTM_BOUNDS: LngLatBbox = [-72.5, 10.0, 45.0, 85.0]
 // The quality index and the contours are separate layers over the same grid. Each advertises a
 // slightly smaller reach (roughly -70.5 to 43) than the bathymetry layer advertises (-73.1 to 45);
-// both figures are advertised extents, distinct from the narrower sampled union above. They share
-// the DTM's coverage, because they render the same data, but not its display envelope.
+// both figures are advertised extents, distinct from the narrower sampled union above.
 const EMODNET_FACET_BOUNDS: LngLatBbox = [-70.5, 11.0, 43.0, 85.0]
+// The facets render the same data as the DTM, so their coverage is the DTM's, clipped to their own
+// narrower envelope. Derived here rather than transcribed, so a re-derived DTM list flows through.
+const EMODNET_FACET_COVERAGE: readonly LngLatBbox[] = clipRegions(
+  EMODNET_DTM_COVERAGE,
+  EMODNET_FACET_BOUNDS,
+  DATA_LAT_LIMIT
+)
 // The two EMODnet Human Activities overlays are a different service with a different reach, so they
 // carry their own advertised envelopes rather than borrowing the bathymetry's.
 const EMODNET_MPA_BOUNDS: LngLatBbox = [-42.39, 34.1, 36.17, 74.92]
 const NATURA_2000_BOUNDS: LngLatBbox = [-32.37, 24.59, 34.1, 69.11]
-// The BlueTopo geographic extent from the service GetCapabilities (bluetopo:bathymetry): US waters
-// spanning longitude -138 to -64.198 (all western hemisphere, so all negative) and latitude 16.786 to
-// 59.55 north. The tuple is [minLng, minLat, maxLng, maxLat]; do not clip the longitudes to positive
-// values, which an earlier bounds error did and which drops the whole extent.
-const BLUETOPO_BOUNDS: LngLatBbox = [-138.0, 16.786, -64.198, 59.55]
+// The BlueTopo geographic extent from the service GetCapabilities (bluetopo:bathymetry, read
+// 2026-10-05): US waters spanning longitude -138.0988 to -64.1977 (all western hemisphere, so all
+// negative) and latitude 16.7858 to 59.5505 north, rounded outward so no edge strip is dropped. The
+// tuple is [minLng, minLat, maxLng, maxLat]; do not clip the longitudes to positive values, which an
+// earlier bounds error did and which drops the whole extent.
+const BLUETOPO_BOUNDS: LngLatBbox = [-138.1, 16.785, -64.197, 59.551]
 // The service-level geographic envelope reported by the current WMS 1.3.0 GetCapabilities. The
 // actual ENC coverage is sparse inside this box, so consumers should still expect transparent tiles.
 const NOAA_ENC_BOUNDS: LngLatBbox = [-180, -78.333333, 180, 81.6]
 // Warming and estimate regions, derived 2026-07-27 from the NOAA ENC product catalog
 // (https://www.charts.noaa.gov/ENCs/ENCProdCat.xml, issued 2026-07-25): the union of every active
-// cell footprint, clustered by region and rounded outward to 0.1 degree. The catalog extremes match
-// the service envelope above (Chukchi Plateau 81.6 north, Vahsel Bay -78.33 south), so re-derive
-// these boxes whenever the upstream monitor reports that envelope drifted. Harbor-scale detail is
-// sparse inside the larger boxes; only areas with no ENC cell at all are excluded.
-const NOAA_ENC_COVERAGE: readonly LngLatBbox[] = [
-  // US East Coast, Gulf coast, Great Lakes, Puerto Rico, and the US Virgin Islands.
-  [-100.8, 15.6, -64.3, 52.8],
-  // US West Coast, Alaska, the eastern Aleutians, the Bering Sea, and the Arctic.
-  [-180, 30.5, -113.7, 81.6],
-  // Aleutian Islands and Gulf of Anadyr west of the antimeridian.
-  [165.6, 48, 180, 68],
-  // Hawaiian Islands out to Kure Atoll, with the surrounding band-1 ocean charts.
-  [-179.3, 5, -154, 30],
-  [-178.8, 15.6, -153.6, 28.8],
-  [-166.4, 18, -150, 30],
-  // San Diego to the Aleutians and Hawaii (US1WC07) and the eastern North Pacific (US1PO02).
-  [-180, 18.7, -116.3, 38.4],
-  [-154, 15, -116.5, 18.8],
-  // South Pacific: Cook, Samoa, Phoenix, and Line Islands (US1EEZ2), plus American Samoa and Swains.
-  [-180, -7.5, -154.3, 18.8],
-  [-173.8, -17.6, -165.2, -10],
-  // Guam, the Northern Mariana Islands, Palau, Micronesia, the Marshall Islands, and Wake Island.
-  [131, 0, 173.6, 26],
-  // Panama Canal approaches.
-  [-80.1, 8.7, -78, 9.9],
-  // Antarctica: Arthur Harbor, and the Weddell Sea coast.
-  [-64.5, -64.9, -63.9, -64.6],
-  [-40, -78.4, -30, -75]
-]
+// cell footprint, clustered by region and rounded outward to 0.1 degree, then clipped to the service
+// envelope above. The catalog extremes match that envelope (Chukchi Plateau 81.6 north, Vahsel Bay
+// -78.33 south), so re-derive these boxes whenever the upstream monitor reports that envelope drifted.
+// Harbor-scale detail is sparse inside the larger boxes; only areas with no ENC cell at all are excluded.
+const NOAA_ENC_COVERAGE: readonly LngLatBbox[] = clipRegions(
+  [
+    // US East Coast, Gulf coast, Great Lakes, Puerto Rico, and the US Virgin Islands.
+    [-100.8, 15.6, -64.3, 52.8],
+    // US West Coast, Alaska, the eastern Aleutians, the Bering Sea, and the Arctic.
+    [-180, 30.5, -113.7, 81.6],
+    // Aleutian Islands and Gulf of Anadyr west of the antimeridian.
+    [165.6, 48, 180, 68],
+    // Hawaiian Islands out to Kure Atoll, with the surrounding band-1 ocean charts.
+    [-179.3, 5, -154, 30],
+    [-178.8, 15.6, -153.6, 28.8],
+    [-166.4, 18, -150, 30],
+    // San Diego to the Aleutians and Hawaii (US1WC07) and the eastern North Pacific (US1PO02).
+    [-180, 18.7, -116.3, 38.4],
+    [-154, 15, -116.5, 18.8],
+    // South Pacific: Cook, Samoa, Phoenix, and Line Islands (US1EEZ2), plus American Samoa and Swains.
+    [-180, -7.5, -154.3, 18.8],
+    [-173.8, -17.6, -165.2, -10],
+    // Guam, the Northern Mariana Islands, Palau, Micronesia, the Marshall Islands, and Wake Island.
+    [131, 0, 173.6, 26],
+    // Panama Canal approaches.
+    [-80.1, 8.7, -78, 9.9],
+    // Antarctica: Arthur Harbor, and the Weddell Sea coast, whose south edge rounds outward past the
+    // service envelope; the clip holds it at the envelope's -78.333333.
+    [-64.5, -64.9, -63.9, -64.6],
+    [-40, -78.4, -30, -75]
+  ],
+  NOAA_ENC_BOUNDS,
+  DATA_LAT_LIMIT
+)
 // Warming and estimate regions, derived 2026-08-01 from the MPA inventory's own geometry: every ring
 // of all 1,623 features across the eight sub-layers, binned to a 2 degree grid and covered by the
 // smallest set of boxes that leaves no occupied cell out. The service fullExtent reaches
@@ -133,22 +154,43 @@ const NOAA_MPA_BOUNDS: LngLatBbox = [-180, -16, 180, 76]
 
 // Attribution strings shared by more than one source, named so a correction cannot land on one copy
 // and miss the other.
-const GEBCO_ATTR = 'GEBCO_2025 Grid, GEBCO Compilation Group (2025)'
+// The acknowledgement the GEBCO WMS GetCapabilities abstract asks for, verbatim as read 2026-10-05.
+// GEBCO releases a new grid every July and the LATEST layers follow it, so the grid name and the DOI
+// both change yearly; check-upstreams.ts compares this against the served grid.
+const GEBCO_ATTR =
+  'Imagery reproduced from the GEBCO_2026 Grid, GEBCO Compilation Group (2026) GEBCO 2026 Grid (doi:10.5285/4f68d5c7-45eb-f999-e063-7086abc036fa)'
 // Both basemaps are the same tileset and the same terms, rendered light and dark, so a corrected
-// credit or a moved host must not be able to land on one and miss the other.
-const OPENMAPTILES_ATTR = '© OpenMapTiles, © OpenStreetMap contributors'
+// credit or a moved host must not be able to land on one and miss the other. Verbatim, fetched from
+// the attribution field of https://tiles.openfreemap.org/planet (the TileJSON both styles reference)
+// on 2026-10-05, entity and link targets included. Transcribed rather than paraphrased, because the
+// catalog credits what the service says it serves, and Chart Locker's style proxy drops that
+// TileJSON, so this copy is the credit a proxied basemap has left.
+// cspell:disable -- verbatim upstream attribution; never edit it to satisfy a dictionary
+const OPENFREEMAP_ATTR =
+  '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> <a href="https://www.openmaptiles.org/" target="_blank">&copy; OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+// cspell:enable
 const OPENFREEMAP_HOST = 'tiles.openfreemap.org'
-const EMODNET_BATHY_ATTR = 'EMODnet Bathymetry Consortium (2022): EMODnet Digital Bathymetry (DTM)'
+// The DTM 2024 release, which the WMS serves: it archives the 2022 grid as emodnet:mean_2022, and the
+// citation and year follow the release's DOI record (https://doi.org/10.12770/cf51df64-56f9-4a99-b1aa-36b8d7b743a1).
+const EMODNET_BATHY_ATTR = 'EMODnet Bathymetry Consortium (2024): EMODnet Digital Bathymetry (DTM 2024)'
 const EMODNET_HA_ATTR = 'EMODnet Human Activities'
 const BLUETOPO_ATTR = 'NOAA Office of Coast Survey, BlueTopo / National Bathymetric Source'
 const NOAA_ENC_ATTR = 'NOAA Office of Coast Survey, Electronic Navigational Charts (ENC)'
 const VLIZ_ATTR = 'Flanders Marine Institute (VLIZ), marineregions.org, CC-BY'
+// Two Marine Regions layers differ from the CC BY credit above, so each carries its own. The IHO sea
+// areas are licensed CC BY-NC-SA 4.0 (https://doi.org/10.14284/323), not CC BY, and the World
+// Heritage marine sites are UNESCO's data, which the service only hosts (https://doi.org/10.14284/592).
+const IHO_ATTR = 'Flanders Marine Institute (VLIZ) (2018): IHO Sea Areas, version 3, marineregions.org, CC BY-NC-SA 4.0'
+const UNESCO_ATTR =
+  'UNESCO (2023): Boundaries of UNESCO World Heritage Marine Sites (v02), marineregions.org, CC BY 4.0'
 // NOAA and NWS products are public domain (https://www.weather.gov/disclaimer), so these credit the
 // producing office rather than carrying a license.
 const NOWCOAST_RADAR_ATTR = 'NOAA/NWS nowCOAST, NEXRAD base reflectivity mosaic'
 const NOWCOAST_CYCLONE_ATTR = 'NOAA/NWS/NHC nowCOAST, tropical cyclone forecast and best track'
 const NOWCOAST_ALERTS_ATTR = 'NOAA/NWS nowCOAST, watches, warnings, and advisories'
-const NOWCOAST_SST_ATTR = 'NOAA nowCOAST, GHRSST sea surface temperature'
+// The layer is the NWS GFS near-surface sea temperature (NSST) analysis, per its own capabilities
+// title and abstract, not a GHRSST product.
+const NOWCOAST_SST_ATTR = 'NOAA/NWS/NCEP nowCOAST, GFS NSST global sea surface temperature analysis'
 // Verbatim, fetched from https://tiles.openwaters.io/seascape/vector.json's and raster.json's
 // identical attribution fields on 2026-08-02, trailing space included (mirrors Binnacle's own copy
 // in src/features/depth-charts/seascape-sources.ts; re-fetch and update both if Seascape's own
@@ -256,7 +298,7 @@ const SOURCES: ChartSource[] = [
     styles: 'quality_index_combined',
     maxzoom: 12,
     bounds: EMODNET_FACET_BOUNDS,
-    coverage: EMODNET_DTM_COVERAGE,
+    coverage: EMODNET_FACET_COVERAGE,
     attribution: EMODNET_BATHY_ATTR,
     group: EMODNET_GROUP
   }),
@@ -265,7 +307,7 @@ const SOURCES: ChartSource[] = [
   wms('depth-emodnet-contours', 'Depth contours', EMODNET_WMS, 'emodnet:contours', {
     maxzoom: 12,
     bounds: EMODNET_FACET_BOUNDS,
-    coverage: EMODNET_DTM_COVERAGE,
+    coverage: EMODNET_FACET_COVERAGE,
     attribution: EMODNET_BATHY_ATTR,
     group: EMODNET_GROUP
   }),
@@ -343,7 +385,8 @@ const SOURCES: ChartSource[] = [
     minzoom: 0,
     maxzoom: 18,
     fallbackTileBytes: 256_000,
-    attribution: '© OpenSeaMap contributors, ODbL',
+    // The seamarks are OpenStreetMap data rendered by OpenSeaMap, so ODbL needs both credits.
+    attribution: '© OpenSeaMap contributors, © OpenStreetMap contributors, ODbL',
     upstream: { mode: 'xyz', urlTemplate: 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png' }
   },
   // The Marine Regions layers are worldwide and served from generalized polygons, so they keep the
@@ -363,7 +406,7 @@ const SOURCES: ChartSource[] = [
   }),
   // IHO S-23 sea areas: what body of water the boat is actually in.
   wms('bound-iho', 'Sea areas (IHO)', MARINE_REGIONS_WMS, 'iho', {
-    attribution: VLIZ_ATTR
+    attribution: IHO_ATTR
   }),
   wms('mpa-emodnet', 'Marine protected areas', EMODNET_HA_WMS, 'marineprotectedareas', {
     bounds: EMODNET_MPA_BOUNDS,
@@ -377,7 +420,7 @@ const SOURCES: ChartSource[] = [
   }),
   // The only worldwide protected-area layer in the catalog; the other three are EU or US only.
   wms('mpa-unesco', 'UNESCO marine sites', MARINE_REGIONS_WMS, 'worldheritagemarineprogramme', {
-    attribution: VLIZ_ATTR
+    attribution: UNESCO_ATTR
   }),
   // Seabed infrastructure: what an anchor must not land on. Advertised envelopes, which for the two
   // cable layers really are near worldwide.
@@ -397,8 +440,10 @@ const SOURCES: ChartSource[] = [
     bounds: [-16.59, 27.73, 24.74, 65.47],
     attribution: EMODNET_HA_ATTR
   }),
-  // Monthly AIS density on a 1 km grid, so it stops well short of the chart-display ceiling.
-  wms('traffic-vessel-density', 'Vessel density', EMODNET_HA_WMS, 'vesseldensity_all', {
+  // Annual average AIS density on a 1 km grid, so it stops well short of the chart-display ceiling.
+  // The annual layer rather than vesseldensity_all: that one is monthly, and with no TIME the server
+  // serves a single month (December 2024 as of 2026-10-05), which misstates traffic for most of the year.
+  wms('traffic-vessel-density', 'Vessel density (annual average)', EMODNET_HA_WMS, 'vesseldensity_allavg', {
     maxzoom: 10,
     bounds: [-87.71, 14.96, 97.63, 85.0],
     attribution: EMODNET_HA_ATTR
@@ -454,7 +499,7 @@ const SOURCES: ChartSource[] = [
     maxzoom: 20,
     vectorMaxzoom: 14,
     fallbackTileBytes: 750_000,
-    attribution: OPENMAPTILES_ATTR,
+    attribution: OPENFREEMAP_ATTR,
     upstream: {
       mode: 'style',
       styleUrl: `https://${OPENFREEMAP_HOST}/styles/liberty`,
@@ -472,7 +517,7 @@ const SOURCES: ChartSource[] = [
     maxzoom: 20,
     vectorMaxzoom: 14,
     fallbackTileBytes: 750_000,
-    attribution: OPENMAPTILES_ATTR,
+    attribution: OPENFREEMAP_ATTR,
     upstream: {
       mode: 'style',
       styleUrl: `https://${OPENFREEMAP_HOST}/styles/dark`,
@@ -523,9 +568,12 @@ export function assertGroupCoherence(sources: readonly ChartSource[]): void {
 function defineCatalog(sources: ChartSource[]): readonly ChartSource[] {
   const ids = new Set<string>()
   for (const source of sources) {
-    validateChartSource(source)
-    if (ids.has(source.id)) throw new TypeError(`duplicate chart source id: ${source.id}`)
-    ids.add(source.id)
+    // Validates the source and registers its prepared snapshot, so the tile and URL helpers take a
+    // catalog source as it is instead of snapshotting and revalidating it on every call. The snapshot
+    // is frozen as deeply as the catalog itself.
+    const { id } = deepFreeze(registerCatalogSource(source).source)
+    if (ids.has(id)) throw new TypeError(`duplicate chart source id: ${id}`)
+    ids.add(id)
   }
   assertGroupCoherence(sources)
   return deepFreeze(sources)

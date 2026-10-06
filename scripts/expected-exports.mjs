@@ -13,6 +13,8 @@ export const EXPECTED_EXPORTS = [
   'MAX_MERCATOR_LAT',
   'MAX_TILE_ZOOM',
   'chartSourceById',
+  'coversBbox',
+  'coversPoint',
   'estimateBytes',
   'expandUpstreamUrl',
   'iterateTilesInBbox',
@@ -20,6 +22,7 @@ export const EXPECTED_EXPORTS = [
   'tileCountInBbox',
   'tileForLngLat',
   'tilesInBbox',
+  'upstreamTileTemplate',
   'validateChartSource',
   'webMercatorTileBounds'
 ]

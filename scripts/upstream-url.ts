@@ -1,12 +1,10 @@
-import assert from 'node:assert/strict'
-import { assertPublicHost } from '../src/validate.js'
+import { assertPublicHttpsUrlShape } from '../src/validate.js'
 
 /** Validate an initial or redirected URL used by the scheduled upstream monitor. */
 export function checkedPublicHttpsUrl(value: string, base?: string): URL {
   const url = new URL(value, base)
-  assert.equal(url.protocol, 'https:', `${url} must use HTTPS`)
-  assert.equal(url.username, '', `${url} must not include credentials`)
-  assert.equal(url.password, '', `${url} must not include credentials`)
-  assertPublicHost(url.hostname, `${url} host`)
+  // The same shape catalog URLs must have: a public service on the default port, with nothing after
+  // the request target that a server never sees anyway.
+  assertPublicHttpsUrlShape(url, url.href)
   return url
 }

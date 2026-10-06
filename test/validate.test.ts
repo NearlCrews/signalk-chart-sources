@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { validateChartSource } from '../src/validate.js'
+import { chartSourceById } from '../src/registry.js'
+import type { LngLatBbox, UpstreamTemplate } from '../src/types.js'
+import { checkedSource, registerCatalogSource, validateChartSource } from '../src/validate.js'
 import { makeSource } from './fixtures.js'
 
 /** A minimal valid WMS upstream. Hoisted so a change to the shape lands in one place. */
@@ -80,6 +82,18 @@ test('validateChartSource rejects malformed runtime shapes and unknown modes', (
     name: 'TypeError',
     message: /coverage must be a dense array/
   })
+})
+
+test('validateChartSource reads only own enumerable properties, as every helper does', () => {
+  // Every field of this source is inherited, so it has no id of its own and fails as the helpers fail it.
+  assert.throws(() => validateChartSource(Object.create(makeSource())), {
+    name: 'TypeError',
+    message: /invalid source id/
+  })
+  // A non-enumerable field is just as absent.
+  const hidden = makeSource()
+  Object.defineProperty(hidden, 'title', { enumerable: false })
+  assert.throws(() => validateChartSource(hidden), /title must be a string/)
 })
 
 test('validateChartSource checks URL safety and every WMS runtime field', () => {
@@ -469,4 +483,296 @@ test('validateChartSource checks style host shape and authorization case-insensi
       ),
     /must not contain duplicates/
   )
+})
+
+test('a URL must name its host directly after https://, without backslashes', () => {
+  // The URL parser skips extra slashes and reads a backslash as a slash, so these spellings move the
+  // host the parser finds away from the host the text appears to name, or split one URL in two.
+  const xyz = (urlTemplate: string): UpstreamTemplate => ({ mode: 'xyz', urlTemplate })
+  const wms = (base: string): UpstreamTemplate => ({ ...wmsUpstream, base })
+  for (const upstream of [
+    xyz('https:///{z}.tiles.example/{x}/{y}.png'),
+    xyz('https://\\{z}.tiles.example/{x}/{y}.png'),
+    xyz('https:///tiles.example/{z}/{x}/{y}.png'),
+    xyz('https://tiles.example/{z}\\{x}/{y}.png'),
+    wms('https:///w.example/wms'),
+    wms('https:\\\\w.example/wms'),
+    wms('https://w.example\\wms')
+  ]) {
+    assert.throws(
+      () => validateChartSource(makeSource({ upstream })),
+      /must name its host directly after https:\/\/|must not contain a backslash/,
+      JSON.stringify(upstream)
+    )
+  }
+  // The scheme itself may be any case, as the parser allows; only the authority spelling is pinned.
+  assert.doesNotThrow(() =>
+    validateChartSource(makeSource({ upstream: { mode: 'arcgis', base: 'HTTPS://m.example/x' } }))
+  )
+})
+
+test('every host rejects a trailing dot or an empty label, which also closes the loopback spellings', () => {
+  // "localhost." resolves to loopback without equaling "localhost", and "h." is a second spelling of
+  // "h", so a name gets exactly one spelling. Address literals arrive with the dot already stripped.
+  const rejected = [
+    'localhost.',
+    'LOCALHOST.',
+    'localhost%2e',
+    'foo.localhost.',
+    'localhost..',
+    'tiles.example.',
+    '.tiles.example',
+    'tiles..example'
+  ]
+  const message = /must not contain an empty label or a trailing dot/
+  for (const host of rejected) {
+    assert.throws(
+      () => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, base: `https://${host}/wms` } }),
+      message,
+      `base ${host}`
+    )
+    assert.throws(
+      () =>
+        validateChartSource(makeSource({ upstream: { mode: 'xyz', urlTemplate: `https://${host}/{z}/{x}/{y}.png` } })),
+      message,
+      `template ${host}`
+    )
+    assert.throws(
+      () =>
+        validateChartSource(
+          makeSource({
+            upstream: {
+              mode: 'xyz',
+              urlTemplate: 'https://t.example/{z}/{x}/{y}.png',
+              tileJsonUrl: `https://${host}/t.json`
+            } as never
+          })
+        ),
+      message,
+      `TileJSON ${host}`
+    )
+    assert.throws(
+      () =>
+        validateChartSource(
+          makeSource({
+            upstream: { mode: 'style', styleUrl: 'https://t.example/s.json', allowedHosts: ['t.example', host] }
+          })
+        ),
+      message,
+      `allowedHosts ${host}`
+    )
+  }
+  assert.throws(
+    () =>
+      validateChartSource(
+        makeSource({ upstream: { mode: 'style', styleUrl: 'https://localhost./s.json', allowedHosts: ['localhost.'] } })
+      ),
+    message
+  )
+  // An address literal written with a trailing dot is still an address literal.
+  assert.throws(
+    () => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, base: 'https://127.0.0.1./wms' } }),
+    /IP address literal/
+  )
+})
+
+test('coverage must lie within bounds when a source carries both', () => {
+  const withBoth = (bounds: LngLatBbox, coverage: LngLatBbox[]) => makeSource({ bounds, coverage })
+  assert.doesNotThrow(() => validateChartSource(withBoth([0, 0, 10, 10], [[0, 0, 10, 10]])))
+  assert.doesNotThrow(() => validateChartSource(withBoth([0, 0, 10, 10], [[2, 2, 4, 4]])))
+  assert.throws(
+    () =>
+      validateChartSource(
+        withBoth(
+          [0, 0, 10, 10],
+          [
+            [2, 2, 4, 4],
+            [9, 9, 11, 10]
+          ]
+        )
+      ),
+    {
+      name: 'RangeError',
+      message: /coverage\[1\] must lie within its bounds/
+    }
+  )
+  assert.throws(() => validateChartSource(withBoth([0, 0, 10, 10], [[2, -1, 4, 4]])), /must lie within its bounds/)
+  // Both may cross the antimeridian: each piece of the coverage box must sit inside a piece of bounds.
+  assert.doesNotThrow(() => validateChartSource(withBoth([170, -10, -170, 10], [[175, -5, -175, 5]])))
+  assert.doesNotThrow(() => validateChartSource(withBoth([170, -10, -170, 10], [[-178, -5, -172, 5]])))
+  assert.throws(() => validateChartSource(withBoth([170, -10, -170, 10], [[175, -5, -160, 5]])), /within its bounds/)
+  // A box ending exactly at -180 splits off a zero-width sliver there, which covers nothing.
+  assert.doesNotThrow(() => validateChartSource(withBoth([0, -10, 180, 10], [[10, -5, -180, 5]])))
+  // Coverage alone, or bounds alone, carries no containment rule.
+  assert.doesNotThrow(() => validateChartSource(makeSource({ coverage: [[-170, -80, 170, 80]] })))
+})
+
+test('WMS values reject percent escapes, which the server would decode after the checks', () => {
+  // "%2C" would add a layer the STYLES pairing never counted, and "%0A" would deliver a line feed.
+  for (const [field, value] of [
+    ['layers', 'a%2Cb'],
+    ['layers', 'a%0D%0AX-Evil:%20yes'],
+    ['styles', 'x%26y'],
+    ['format', 'image/png%3B']
+  ] as const) {
+    assert.throws(
+      () => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, styles: '', [field]: value } }),
+      /must not contain whitespace, controls, invisibles, or the characters % & \? # \+ ; =/,
+      `${field} ${value}`
+    )
+  }
+})
+
+test('WMS and ArcGIS requests reject any brace but their bbox token, which MapLibre would fill', () => {
+  // upstreamTileTemplate hands these requests to MapLibre, which replaces {ratio}, {quadkey}, {x}, and
+  // its other tokens anywhere in a template, so the direct request would stop matching the proxied
+  // one. The check runs on the request as built, so a brace in any field, the base included, fails it.
+  const wms = /WMS request must not contain braces other than the bbox token/
+  const arcgis = /ArcGIS request must not contain braces other than the bbox token/
+  for (const [upstream, message] of [
+    [{ ...wmsUpstream, layers: 'a{ratio}' }, wms],
+    [{ ...wmsUpstream, styles: 'x{quadkey}' }, wms],
+    [{ ...wmsUpstream, format: 'image/{prefix}png' }, wms],
+    [{ ...wmsUpstream, layers: 'stray}' }, wms],
+    // A second bbox token is a brace pair the request does not own, and MapLibre would fill it too.
+    [{ ...wmsUpstream, layers: 'a{bbox-epsg-3857}' }, wms],
+    [{ ...wmsUpstream, base: 'https://wms.example.com/{x}/wms' }, wms],
+    [{ ...wmsUpstream, base: 'https://wms.example.com/wms}' }, wms],
+    [{ mode: 'arcgis', base: 'https://wms.example.com/{x}/wms' }, arcgis],
+    [{ mode: 'arcgis', base: 'https://wms.example.com/wms}' }, arcgis],
+    [{ mode: 'arcgis', base: 'https://m.example/{bbox-epsg-3857}/MapServer' }, arcgis]
+  ] as const) {
+    assert.throws(
+      () => validateChartSource(makeSource({ upstream })),
+      { name: 'TypeError', message },
+      JSON.stringify(upstream)
+    )
+  }
+})
+
+test('rejected values are echoed with controls, line separators, format characters, and lone surrogates escaped', () => {
+  const messageOf = (id: string): string => {
+    try {
+      validateChartSource({ ...makeSource(), id })
+    } catch (error) {
+      return (error as Error).message
+    }
+    assert.fail(`${JSON.stringify(id)} must be rejected`)
+  }
+  assert.equal(messageOf('bad\r\nforged: line'), 'invalid source id: bad\\u000D\\u000Aforged: line')
+  // The Unicode line and paragraph separators break a line in many log viewers just as LF does.
+  assert.equal(messageOf('bad\u2028forged\u2029line'), 'invalid source id: bad\\u2028forged\\u2029line')
+  assert.equal(messageOf('rtl‮evil'), 'invalid source id: rtl\\u202Eevil')
+  assert.equal(messageOf('tag\u{E0001}'), 'invalid source id: tag\\u{E0001}')
+  // Truncation can split a surrogate pair, and the orphaned half is escaped rather than echoed.
+  const split = messageOf(`${'a'.repeat(63)}\u{1F6A2}`)
+  assert.equal(split, `invalid source id: ${'a'.repeat(63)}\\uD83D...`)
+})
+
+test('attribution may carry plain https links and no other markup', () => {
+  const attribution = (text: string) => makeSource({ attribution: text })
+  for (const accepted of [
+    '© Example contributors',
+    'depth 10 > 5 is fine',
+    '<a href="https://example.org/license">© Example</a>',
+    'Data <a href="https://a.example/x?y=1#z">A</a> and <a href="https://b.example/">B</a> ',
+    '<a href="https://example.org/">a > b</a>',
+    // The one optional attribute, as OpenFreeMap's TileJSON credit carries it.
+    '<a href="https://example.org/" target="_blank">&copy; Example</a>'
+  ]) {
+    assert.doesNotThrow(() => validateChartSource(attribution(accepted)), accepted)
+  }
+  for (const rejected of [
+    '<img src=x onerror="alert(1)">',
+    '<script>alert(1)</script>',
+    'depth < 10',
+    '<a href="http://example.org/">plain http</a>',
+    "<a href='https://example.org/'>single quotes</a>",
+    '<a href="https://example.org/" onclick="x()">extra attribute</a>',
+    '<a href="https://example.org/" target="_top">other target</a>',
+    '<a target="_blank" href="https://example.org/">attributes swapped</a>',
+    '<A HREF="https://example.org/">uppercase</A>',
+    '<a href="https://example.org/ x">space in href</a>',
+    '<a href="https://example.org/">unclosed',
+    '<a href="https://example.org/"><b>nested</b></a>'
+  ]) {
+    assert.throws(
+      () => validateChartSource(attribution(rejected)),
+      { name: 'TypeError', message: /must be plain text apart from <a href="https:\/\/\.\.\."> links/ },
+      rejected
+    )
+  }
+})
+
+test('an oversized list is refused on its length before its entries are walked', () => {
+  // Sparse and far past the bound: the length error wins, so a hostile length is never scanned.
+  assert.throws(() => validateChartSource(makeSource({ coverage: Array(1_000_000) })), {
+    name: 'RangeError',
+    message: /between 1 and 64 boxes/
+  })
+})
+
+test('a catalog source resolves to one prepared snapshot, and a lookalike is checked in full', () => {
+  // The catalog was validated once, when it was built, so a catalog source comes back as the same
+  // prepared snapshot every time, and that snapshot is recognized when it comes back in.
+  const seamark = chartSourceById('seamark')
+  assert.ok(seamark)
+  const prepared = checkedSource(seamark)
+  assert.equal(checkedSource(seamark), prepared)
+  assert.equal(checkedSource(prepared.source), prepared)
+  assert.notEqual(prepared.source, seamark)
+  assert.deepEqual(structuredClone(prepared.source), seamark)
+  assert.ok(Object.isFrozen(prepared.source) && Object.isFrozen(prepared.source.upstream), 'frozen like the catalog')
+  // Anything else is copied onto null prototypes and validated.
+  const supplied = makeSource()
+  const checked = checkedSource(supplied).source
+  assert.notEqual(checked, supplied)
+  // The snapshot sits on a null prototype, so compare its data rather than its object identity.
+  assert.deepEqual(structuredClone(checked), supplied)
+  assert.equal(Object.getPrototypeOf(checked), null)
+  // Registering a source validates it first, frozen or not.
+  assert.throws(() => registerCatalogSource({ ...makeSource(), title: '' }), /title must be between 1 and/)
+  // A frozen copy of a catalog source is not the catalog source, so it is snapshotted and validated in full.
+  const frozen = Object.freeze({ ...makeSource(), title: '' })
+  assert.throws(() => checkedSource(frozen), /title must be between 1 and/)
+  // A snapshot keeps holes, so a sparse list still fails the dense check after the copy.
+  assert.throws(() => checkedSource(makeSource({ coverage: Array(2) })), /coverage must be a dense array/)
+  const allowedHosts = ['t.example']
+  allowedHosts.length = 2
+  assert.throws(
+    () =>
+      checkedSource(makeSource({ upstream: { mode: 'style', styleUrl: 'https://t.example/s.json', allowedHosts } })),
+    /allowedHosts must be a dense array/
+  )
+})
+
+test('a prepared source carries its regions split at the antimeridian, else its bounds, else the world', () => {
+  const regionsOf = (source: unknown) => checkedSource(source).regions
+  assert.deepEqual(regionsOf(makeSource()), [[-180, -90, 180, 90]])
+  assert.deepEqual(regionsOf(makeSource({ bounds: [170, -10, -170, 10] })), [
+    [170, -10, 180, 10],
+    [-180, -10, -170, 10]
+  ])
+  // Coverage replaces bounds, and only a box that crosses is split.
+  const prepared = checkedSource(
+    makeSource({
+      bounds: [-180, -20, 180, 20],
+      coverage: [
+        [0, 0, 10, 10],
+        [175, -5, -175, 5]
+      ]
+    })
+  )
+  assert.deepEqual(prepared.regions, [
+    [0, 0, 10, 10],
+    [175, -5, 180, 5],
+    [-180, -5, -175, 5]
+  ])
+  // The regions are the record's own copies, so none is an array of a catalog source's frozen snapshot.
+  const enc = chartSourceById('depth-noaa-enc')
+  assert.ok(enc)
+  const { source, regions: encRegions } = checkedSource(enc)
+  assert.ok(source.coverage && Object.isFrozen(source.coverage) && source.coverage.every((box) => Object.isFrozen(box)))
+  assert.deepEqual(encRegions, source.coverage)
+  assert.ok(encRegions.every((region) => !source.coverage?.includes(region)))
 })

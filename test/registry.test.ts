@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EXPECTED_EXPORTS } from '../scripts/expected-exports.mjs'
 import { expandUpstreamUrl } from '../src/expand.js'
+import { MAX_MERCATOR_LAT, tileCountInBbox } from '../src/mercator.js'
 import { assertGroupCoherence, CHART_SOURCES, chartSourceById } from '../src/registry.js'
 import type { ChartSource, LngLatBbox } from '../src/types.js'
 import { src } from './fixtures.js'
@@ -58,7 +59,11 @@ test('key sources pin their transcribed upstream data (drift guard)', () => {
   assert.ok(gebco.upstream.mode === 'wms')
   assert.equal(gebco.upstream.base, 'https://wms.gebco.net/mapserv')
   assert.equal(gebco.upstream.layers, 'GEBCO_LATEST')
-  assert.equal(gebco.attribution, 'GEBCO_2025 Grid, GEBCO Compilation Group (2025)')
+  assert.equal(
+    gebco.attribution,
+    'Imagery reproduced from the GEBCO_2026 Grid, GEBCO Compilation Group (2026) GEBCO 2026 Grid ' +
+      '(doi:10.5285/4f68d5c7-45eb-f999-e063-7086abc036fa)'
+  )
   const enc = src('depth-noaa-enc')
   assert.ok(enc.upstream.mode === 'wms')
   assert.equal(enc.upstream.layers, '0,1,2,3,4,5,6,7,10')
@@ -97,6 +102,46 @@ test('key sources pin their transcribed upstream data (drift guard)', () => {
   const seascapeVector = src('seascape-vector')
   assert.ok(seascapeVector.upstream.mode === 'xyz')
   assert.equal(seascapeVector.upstream.urlTemplate, 'https://tiles.openwaters.io/seascape/{z}/{x}/{y}.pbf')
+  const vesselDensity = src('traffic-vessel-density')
+  assert.ok(vesselDensity.upstream.mode === 'wms')
+  // The annual average, not the monthly layer whose TIME-less default is a single month.
+  assert.equal(vesselDensity.upstream.layers, 'vesseldensity_allavg')
+  assert.equal(vesselDensity.title, 'Vessel density (annual average)')
+})
+
+test('attribution names the release and the license each upstream states (drift guard)', () => {
+  // Each string credits what its upstream says it serves today: a stale release year or a license
+  // the dataset does not carry is a misstatement, so these are pinned rather than pattern-matched.
+  for (const id of ['depth-emodnet', 'depth-emodnet-quality', 'depth-emodnet-contours']) {
+    assert.equal(
+      src(id).attribution,
+      'EMODnet Bathymetry Consortium (2024): EMODnet Digital Bathymetry (DTM 2024)',
+      `${id} attribution`
+    )
+  }
+  // The IHO sea areas are non-commercial and share-alike, unlike the other Marine Regions layers.
+  assert.equal(
+    src('bound-iho').attribution,
+    'Flanders Marine Institute (VLIZ) (2018): IHO Sea Areas, version 3, marineregions.org, CC BY-NC-SA 4.0'
+  )
+  assert.equal(src('bound-eez').attribution, 'Flanders Marine Institute (VLIZ), marineregions.org, CC-BY')
+  assert.equal(
+    src('mpa-unesco').attribution,
+    'UNESCO (2023): Boundaries of UNESCO World Heritage Marine Sites (v02), marineregions.org, CC BY 4.0'
+  )
+  assert.equal(
+    src('ocean-sst-global').attribution,
+    'NOAA/NWS/NCEP nowCOAST, GFS NSST global sea surface temperature analysis'
+  )
+  assert.equal(src('seamark').attribution, '© OpenSeaMap contributors, © OpenStreetMap contributors, ODbL')
+  // Transcribed from the OpenFreeMap planet TileJSON, entity and link targets included.
+  // cspell:disable -- verbatim upstream attribution
+  const openFreeMap =
+    '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> <a href="https://www.openmaptiles.org/" target="_blank">&copy; OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+  // cspell:enable
+  for (const id of ['basemap', 'basemap-dark']) {
+    assert.equal(src(id).attribution, openFreeMap, `${id} attribution`)
+  }
 })
 
 test('chartSourceById returns the catalog entry or undefined', () => {
@@ -142,6 +187,13 @@ test('every source has a sane zoom range and a vectorMaxzoom within maxzoom', ()
   }
 })
 
+test('the Seascape credit is one exact https link to its license', () => {
+  // MapLibre renders attribution as HTML, so validation, which runs on every source when the catalog
+  // is built, allows only plain anchors. This pins the shape of the one credit that links its license.
+  const seascape = src('seascape-dem')
+  assert.match(seascape.attribution, /^<a href="https:\/\/openwaters\.io\/[^"]+">[^<]+<\/a> $/)
+})
+
 test('every bounded source has a finite, non-degenerate west, south, east, north box', () => {
   for (const s of CHART_SOURCES) {
     if (!s.bounds) continue
@@ -175,7 +227,7 @@ test('BlueTopo bounds pin the US extent from the service capabilities (drift gua
   assert.ok(bluetopo.bounds, 'depth-bluetopo must carry bounds')
   // South is a positive latitude and east is a negative longitude; a regression to the earlier
   // South Atlantic and European box fails here.
-  assert.deepEqual(bluetopo.bounds, [-138.0, 16.786, -64.198, 59.55])
+  assert.deepEqual(bluetopo.bounds, [-138.1, 16.785, -64.197, 59.551])
 })
 
 test('NOAA ENC coverage pins the chart regions from the ENC product catalog (drift guard)', () => {
@@ -199,7 +251,7 @@ test('NOAA ENC coverage pins the chart regions from the ENC product catalog (dri
     [131, 0, 173.6, 26],
     [-80.1, 8.7, -78, 9.9],
     [-64.5, -64.9, -63.9, -64.6],
-    [-40, -78.4, -30, -75]
+    [-40, -78.333333, -30, -75]
   ])
   // The first region is the densest one, so the upstream monitor samples a representative US tile.
   const covered = coveredBy(enc)
@@ -213,10 +265,23 @@ test('NOAA ENC coverage pins the chart regions from the ENC product catalog (dri
 
 test('EMODnet coverage pins the sampled DTM regions (drift guard)', () => {
   const emodnet = src('depth-emodnet')
-  // The bathymetry, its quality index, and its contours are the same grid, so they must warm the
-  // same ground. Sharing one constant is what makes that true; this catches it being unshared.
-  assert.deepEqual(src('depth-emodnet-quality').coverage, emodnet.coverage)
-  assert.deepEqual(src('depth-emodnet-contours').coverage, emodnet.coverage)
+  // The quality index and the contours render the same grid as the bathymetry, but advertise a
+  // narrower envelope, so they warm the DTM coverage clipped to it: the same ground wherever they can
+  // be drawn, and nothing their bounds would hide. Pinned box by box so the derivation is visible.
+  const facetCoverage = [
+    [-37.5, 27.5, 40.0, 85.0],
+    [40.0, 40.0, 43.0, 85.0],
+    [-37.5, 15.0, -12.5, 27.5],
+    [-70.5, 11.0, -57.5, 20.0],
+    [32.5, 22.5, 37.5, 27.5],
+    [35.0, 15.0, 42.5, 25.0],
+    [42.5, 15.0, 43.0, 17.5]
+  ]
+  for (const id of ['depth-emodnet-quality', 'depth-emodnet-contours']) {
+    const facet = src(id)
+    assert.deepEqual(facet.bounds, [-70.5, 11.0, 43.0, 85.0], `${id} bounds`)
+    assert.deepEqual(facet.coverage, facetCoverage, `${id} coverage`)
+  }
   // Disjoint by construction, so each box is exactly the region its comment names and none is
   // implied by a neighbor. tileCountInBbox deduplicates overlaps, so this is for the reader.
   assert.deepEqual(emodnet.coverage, [
@@ -237,6 +302,20 @@ test('EMODnet coverage pins the sampled DTM regions (drift guard)', () => {
   // The advertised bbox reaches these; the sampled data does not, which is the whole point.
   assert.equal(covered(-71, 42.3), false, 'Boston must not be covered')
   assert.equal(covered(10, 20), false, 'the Sahara must not be covered')
+})
+
+test('clipped catalog coverage warms exactly the tiles it did before the clip moved to load time', () => {
+  // The EMODnet facets and the NOAA ENC sources carry coverage clipped to their envelopes as the
+  // catalog loads. The counts over the whole world at the chart-display zooms pin the clipped result.
+  const world: LngLatBbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
+  for (const [id, tiles] of [
+    ['depth-emodnet-quality', 2_191_191],
+    ['depth-emodnet-contours', 2_191_191],
+    ['depth-noaa-enc', 2_267_078],
+    ['depth-noaa-enc-quality', 2_267_078]
+  ] as const) {
+    assert.equal(tileCountInBbox(src(id), world, [0, 12]), tiles, id)
+  }
 })
 
 test('NOAA MPA coverage pins the inventory regions (drift guard)', () => {
