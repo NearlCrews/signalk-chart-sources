@@ -9,9 +9,100 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+### Added
+
+- Add `coversBbox(source, bbox, zoomRange)`, which reports whether a source covers any tile of a box
+  within a zoom range. It answers the same as `tileCountInBbox(...) > 0` without counting, and never
+  raises the unsafe-total error a huge box at a deep zoom raises there.
+- Add `coversPoint(source, lng, lat, zoomRange?)`, which reports whether a point lies inside a
+  source's coverage regions, bounds, or the world, with inclusive edges and antimeridian-crossing
+  regions split there. Given a zoom range, it also requires the source to serve a zoom in it.
+- Add `upstreamTileTemplate(source)`, which returns the tile URL template a renderer requests
+  directly, with MapLibre's `{bbox-epsg-3857}` token for WMS and ArcGIS sources. It shares one
+  parameter builder with `expandUpstreamUrl`, so a direct renderer and a proxying cache request the
+  same image, and it honors the source's tile size, format, and transparency.
+
+### Changed
+
+- Reject a `coverage` region that reaches outside the source's `bounds`. The EMODnet quality and
+  contour facets now carry their own coverage, clipped to their bounds, and the NOAA ENC Weddell Sea
+  region stops at the service's southern edge. Over the whole world at zooms 0 to 12, each EMODnet
+  facet falls from 2,245,846 to 2,191,191 tiles and each NOAA ENC source from 2,267,591 to
+  2,267,078.
+- Accept only plain text, character entities, and `<a href="https://...">` links, optionally with
+  `target="_blank"`, in `attribution`. MapLibre renders attribution as HTML, so any other markup in
+  a consumer-supplied source was an injection path.
+- Reject `%` in WMS layer, style, and format values, which the server decodes after validation has
+  passed, and reject braces there and in WMS and ArcGIS bases, where MapLibre would fill its own
+  tokens in a direct request.
+- Reject URL hosts with a trailing dot or an empty label. `localhost.` reaches the loopback interface
+  but slipped past the loopback check, and a trailing dot gave one host a second cache key.
+- Reject URLs containing a backslash or an empty authority, which the URL parser repairs and which
+  let a template carry a tile token in its host, and require a template's host to stay the same for
+  every tile.
+- Read a source's own enumerable properties once, then validate and use that copy, in
+  `validateChartSource`, the tile helpers, and `estimateBytes` as well as `expandUpstreamUrl`. A
+  getter could otherwise hand validation one value and the tile math another, and a polluted
+  `Object.prototype.coverage` or `maxAgeSeconds` could reshape counts and estimates, catalog sources
+  included. A source built with `Object.create` or on prototype properties now throws.
+- Validate the box, the zoom range, and the averages object in `estimateBytes` even for an empty
+  source list, and validate every supplied source before deduplicating by id.
+- Validate catalog sources once, when the catalog loads, instead of on every helper call.
+  `expandUpstreamUrl` on a catalog source runs about eighteen times faster.
+- Convert degrees to radians in `tileForLngLat` with the single multiplication the Rust tile cache
+  uses. A point within a few units in the last place of a tile boundary may land one tile over, and
+  boundary disagreements with the Rust enumeration fall by more than an order of magnitude.
+- Escape control, format, and lone-surrogate characters in input echoed by error messages, and bound
+  the echoed id in the unknown-source error.
+- Report an oversized `coverage` or `allowedHosts` list by its length before scanning it for holes.
+- Request the annual-average layer for `traffic-vessel-density`, retitled "Vessel density (annual
+  average)". The monthly layer, requested without a time, showed a single month.
+- Round the BlueTopo bounds outward to the advertised extent, recovering a strip along the west edge.
+- Remove the `prepare` script. Both consumers install from the registry, and installing from a Git URL
+  no longer builds the package.
+- Clear `dist` before each build, so a renamed module cannot leave a stale file in the tarball.
+- Type-check the packed declarations with TypeScript 7 and TypeScript 6 under NodeNext and Bundler
+  resolution, matching how the consumers compile.
+- Run the full dependency audit through a reviewed policy. It accepts only GHSA-vfj7-8cjw-p6xm, a
+  `braces` advisory with no patched release that reaches the repository solely through
+  `markdownlint-cli2`, and fails on any other finding, and once that advisory is gone.
+- Require Node.js 22.18 or newer for development, which npm reports through `devEngines`. The
+  published package still supports Node.js 22.
+- Check style sources' TileJSON attribution and zoom ceiling, the GEBCO acknowledgement verbatim, the
+  EMODnet release year, the NOAA ENC layer titles, and the NOAA MPA ArcGIS service in the upstream
+  monitor, and report each WMS service as its own check, so one drifted service cannot hide another.
+  Every source carrying derived coverage, the EMODnet DTM and its facets included, is now checked
+  against the upstream extent its regions were derived from.
+- Remove the `package:check`, `package:lint`, and `audit:policy` scripts. `test:package` runs Publint
+  and the packed-tarball smoke test, and `audit:full` runs the reviewed audit, whose policy is now
+  covered by the test suite.
+- Write upstream monitor failures to the run summary and quote them in the tracking issue, skipping a
+  comment when the report is unchanged. Only runs on `main` update the issue, cancelled runs leave it
+  alone, and the tracker acts only on the issue and comments the workflow itself wrote, so a
+  look-alike issue or a copied report cannot steer it.
+- Add a workflow-security workflow running actionlint and zizmor, a seven-day Dependabot cooldown,
+  and no dependency cache in the publish verify job. Pushes to `main` no longer cancel an earlier
+  `main` run, and publishing uses the npm bundled with Node.js after confirming it supports trusted
+  publishing.
+- Refresh every development dependency to its latest release.
+
 ### Fixed
 
-- Update the GEBCO attribution to the 2025 grid now served by the upstream WMS.
+- Credit each upstream the way it asks to be credited today:
+  - GEBCO: the full acknowledgement its WMS requests for the 2026 grid it now serves, DOI included.
+  - EMODnet bathymetry: the DTM 2024 release the service serves, replacing 2022.
+  - IHO sea areas: CC BY-NC-SA 4.0, the dataset's license, instead of CC BY.
+  - UNESCO World Heritage marine sites: UNESCO as the data's creator.
+  - Sea surface temperature: the NOAA GFS NSST analysis the layer serves, not GHRSST.
+  - OpenFreeMap basemaps: the credit the tileset publishes, verbatim, which adds OpenFreeMap itself.
+  - OpenSeaMap seamarks: the OpenStreetMap credit.
+
+### Security
+
+- Check each redirect hop in the upstream monitor before following it, instead of after the request
+  had already landed, and reject ports, fragments, trailing-dot hosts, and empty labels there.
+- Override the development toolchain's `smol-toml` to 1.9.0 (GHSA-r4xh-jqrq-34v2) and `katex` to
+  0.18.2 (GHSA-238p-pmpm-9mq7).
 
 ## [0.7.2] - 2026-08-04
 

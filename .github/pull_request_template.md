@@ -16,18 +16,16 @@
 ## Verification
 
 - [ ] `npm run verify:commit` passes
-- [ ] `npm test` passes
-- [ ] `npm run test:coverage` passes
 - [ ] `npm run typecheck` passes
-- [ ] `npm run build` passes
+- [ ] `npm run test:coverage` passes
 - [ ] `npm run test:package` passes
-- [ ] `npm audit` and `npm audit --omit=dev` pass
+- [ ] `npm run audit:full` and `npm run audit:runtime` pass
 - [ ] `git diff --check` passes
 - [ ] Documentation and public code comments match the changed behavior
 
 ## Chart sources, tile math, and byte estimate affected
 
-<!-- Optional. List added or changed chart sources (raster overlays, the vector basemap), Web Mercator tile-math helpers, URL-expansion helpers, or the byte estimate. Note: a Web Mercator formula that must agree with the Rust tile-cache container has to stay bit-exact with the container copy; change both together. Remove section if not applicable. -->
+<!-- Optional. List added or changed chart sources (raster overlays, the vector basemap), Web Mercator tile-math helpers, URL-expansion helpers, or the byte estimate. Note: the ORIGIN constant and webMercatorTileBounds stay bit-exact with the Rust tile-cache container copy, and tileForLngLat shares its formula; change both together. Remove section if not applicable. -->
 
 - [ ] Live capabilities and sample tiles were checked when catalog data changed
 - [ ] `scripts/check-upstreams.ts` was updated when an upstream invariant changed

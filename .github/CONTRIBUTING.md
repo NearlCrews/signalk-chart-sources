@@ -31,8 +31,25 @@ byte estimate are all in scope.
 4. Add tests for any new functionality and keep the existing suites green.
 5. Run `npm run verify` and `git diff --check` before pushing.
 6. Run `npm run test:upstreams` when catalog data, source validation, or monitor behavior changes.
-7. Update `README.md`, `CHANGELOG.md`, public code comments, and templates affected by the change.
+7. Update `README.md`, `MIGRATING.md`, `CHANGELOG.md`, public code comments, and the templates
+   affected by the change.
 8. Open a pull request with a clear description of the change.
+
+## Development toolchain
+
+- Development needs Node.js 22.18 or newer, because the spelling check requires it. The
+  `devEngines` field in `package.json` warns on an older Node.js; the published package itself still
+  supports Node.js 22 or newer.
+- `@types/node` tracks the newest Node.js release, so the type checker accepts APIs newer than the
+  Node.js 22 floor. CI runs the test suite on Node.js 22, which catches a newer-only API in the tests
+  at run time. `src/` may not use Node.js APIs at all, and Biome enforces that.
+- The `typescript6` development dependency is TypeScript 6 under an alias. The package smoke test
+  uses it to compile a consumer the way TypeScript 6 tooling does, beside the TypeScript 7 `tsc`.
+  Dependabot does not update aliased packages, so bump it by hand within the TypeScript 6 line.
+- `npm run audit:full` accepts only the development-only advisories listed in
+  `scripts/audit-policy.mjs`. A new advisory needs a dependency update, an override to a patched
+  release, or a reviewed entry in that file with its exit condition. `test/audit-policy.test.ts`
+  pins the accepted list, so a new entry updates it too.
 
 ## Code style
 
@@ -56,9 +73,10 @@ This repository ships exactly ONE npm package. Keep it modular by splitting the 
 files under `src/`. Never split the project into multiple npm packages or a monorepo.
 
 The catalog and the tile math live here so the Binnacle chartplotter render config and the Chart
-Locker tile-cache proxy allowlist derive from one definition. Any Web Mercator formula that must
-agree with the Rust tile-cache container is kept bit-exact with the container copy; change both
-together.
+Locker tile-cache proxy allowlist derive from one definition. The `ORIGIN` constant and
+`webMercatorTileBounds` stay bit-exact with the Rust tile-cache container copy. `tileForLngLat`
+shares the container's formula but can differ by one tile for a point exactly on a tile boundary.
+Change both implementations together.
 
 Live service checks belong in `scripts/check-upstreams.ts` and the scheduled upstream-monitor
 workflow, not pull-request CI. Update the monitor whenever a source mode or capability invariant

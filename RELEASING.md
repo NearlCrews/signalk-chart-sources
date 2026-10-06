@@ -48,7 +48,8 @@ corresponding npm automation token, and confirm the workflow still publishes wit
    npm version <version> --no-git-tag-version
    ```
 
-5. Run the complete local sequence:
+5. Run the complete local sequence. `npm run verify` includes the full audit, which accepts only
+   the advisories reviewed in `scripts/audit-policy.mjs`:
 
    ```bash
    npm ci
@@ -70,14 +71,16 @@ corresponding npm automation token, and confirm the workflow still publishes wit
 2. Create an annotated `v<version>` tag on the verified commit and push it.
 3. Create a stable, non-prerelease GitHub release from that tag. The workflow rejects a tag that does
    not match `package.json`, a prerelease version, or a commit that is not reachable from `main`.
-4. The verify job installs the lockfile, runs repository quality checks, builds, type-checks, runs
-   tests, coverage, and audits, creates one tarball, validates it with Publint, smoke-tests its runtime
-   and declarations in an installed consumer, and uploads that exact artifact.
+4. The verify job installs the lockfile without a dependency cache, runs repository quality
+   checks, builds, type-checks, runs tests under the coverage thresholds, runs the reviewed full
+   audit and the runtime audit, creates one tarball, validates it with Publint, smoke-tests its
+   runtime and its declarations under TypeScript 7 and TypeScript 6 in an installed consumer, and
+   uploads that exact artifact.
 5. Inspect the pending deployment, then approve the protected `npm` environment. This is the final
    approval before npm publication.
-6. The publish job downloads the verified tarball and publishes it through npm OIDC with provenance.
-   The workflow installs a pinned npm version with trusted-publishing support before publishing;
-   update that pin deliberately when npm ships relevant fixes.
+6. The publish job downloads the verified tarball and publishes it through npm OIDC with provenance,
+   using the npm bundled with Node.js 24. It first fails unless that npm is 11.5.1 or newer, the
+   first release with trusted-publishing support; it installs no other npm.
 
 ## Verify publication
 
