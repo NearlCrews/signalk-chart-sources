@@ -1,6 +1,8 @@
 export { DEFAULT_TILE_BYTES_BY_MODE, estimateBytes } from './estimate.js'
-export { expandUpstreamUrl, proxyTileTemplate } from './expand.js'
+export { expandUpstreamUrl, proxyTileTemplate, upstreamTileTemplate } from './expand.js'
 export {
+  coversBbox,
+  coversPoint,
   DEFAULT_MAX_ENUMERATED_TILES,
   iterateTilesInBbox,
   MAX_MERCATOR_LAT,

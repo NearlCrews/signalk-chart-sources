@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DEFAULT_TILE_BYTES_BY_MODE, estimateBytes } from '../src/estimate.js'
 import { tileCountInBbox } from '../src/mercator.js'
-import type { LngLatBbox } from '../src/types.js'
+import type { ChartSource, LngLatBbox, ZoomRange } from '../src/types.js'
 import { makeSource, src } from './fixtures.js'
 
 const BBOX: LngLatBbox = [-1, -1, 1, 1]
@@ -64,6 +64,65 @@ test('estimateBytes fails closed for unknown source ids', () => {
     name: 'RangeError',
     message: /unknown chart source/
   })
+  // The echo is bounded and escaped like every other rejected value, so a hostile id can neither
+  // flood a log nor forge a second line in it.
+  assert.throws(
+    () => estimateBytes(['x'.repeat(1_000_000)], BBOX, [6, 6], {}),
+    (error: unknown) => error instanceof RangeError && error.message.length < 200 && error.message.endsWith('...')
+  )
+  assert.throws(
+    () => estimateBytes(['bad\r\nforged log line'], BBOX, [6, 6], {}),
+    (error: unknown) =>
+      error instanceof RangeError && !/[\r\n]/.test(error.message) && error.message.includes('\\u000D\\u000A')
+  )
+})
+
+test('estimateBytes falls back to the per-mode default for a source without its own fallback', () => {
+  // Every catalog source carries fallbackTileBytes, so only a supplied source reaches this table.
+  for (const upstream of [
+    { mode: 'xyz', urlTemplate: 'https://t.example/{z}/{x}/{y}.png' },
+    { mode: 'wmts', urlTemplate: 'https://t.example/wmts?M={z}&R={y}&C={x}' }
+  ] as const) {
+    const source = makeSource({ id: `mode-${upstream.mode}`, upstream })
+    assert.equal(source.fallbackTileBytes, undefined)
+    const tiles = tileCountInBbox(source, BBOX, [6, 6])
+    assert.ok(tiles > 0)
+    assert.equal(estimateBytes([source], BBOX, [6, 6], {}), tiles * DEFAULT_TILE_BYTES_BY_MODE[upstream.mode])
+  }
+})
+
+test('estimateBytes checks every input even when no source is priced', () => {
+  // An empty list, or one whose later entries all dedupe away, must not turn a malformed request into
+  // a confident zero.
+  assert.throws(() => estimateBytes([], [Number.NaN, 0, 0, 0], [6, 6], {}), /four finite coordinates/)
+  assert.throws(() => estimateBytes([], BBOX, [9, 2], {}), /must not exceed/)
+  assert.throws(() => estimateBytes([], BBOX, [6, 6], null as unknown as Record<string, number>), {
+    name: 'TypeError',
+    message: /perSourceAvgBytes must be an object/
+  })
+  assert.throws(() => estimateBytes('seamark' as unknown as string[], BBOX, [6, 6], {}), {
+    name: 'TypeError',
+    message: /sources must be an array/
+  })
+  assert.equal(estimateBytes([], BBOX, [6, 6], {}), 0)
+  // A later entry sharing an earlier id is still validated before the dedupe drops it.
+  const invalid = { ...makeSource({ id: 'seamark' }), tileSize: 1 } as unknown as ChartSource
+  assert.throws(() => estimateBytes(['seamark', invalid], BBOX, [6, 6], {}), /tileSize must be 256 or 512/)
+})
+
+test('estimateBytes reads a supplied source once, so an accessor cannot change it after validation', () => {
+  let reads = 0
+  const swapping = {
+    ...makeSource({ id: 'swap' }),
+    get fallbackTileBytes() {
+      reads++
+      return reads === 1 ? 1_000 : -1_000_000_000
+    }
+  } as unknown as ChartSource
+  const range: ZoomRange = [6, 6]
+  const tiles = tileCountInBbox(makeSource(), BBOX, range)
+  assert.equal(estimateBytes([swapping], BBOX, range, {}), tiles * 1_000)
+  assert.equal(reads, 1)
 })
 
 test('estimateBytes accepts a whole source, so a consumer can price one it defined itself', () => {
@@ -88,7 +147,7 @@ test('estimateBytes checks a supplied source before trusting it', () => {
   // or into the dedupe set to suppress a real source that shares the id.
   const invalid = makeSource({ id: 'Not A Valid Id' })
   assert.throws(() => estimateBytes([invalid], BBOX, [6, 6], {}), { name: 'TypeError', message: /invalid source id/ })
-  // The rest of the shape is still checked, by tileCountInBbox, before any tile is counted.
+  // The rest of the shape is checked in the same pass, before any tile is counted.
   assert.throws(() => estimateBytes([makeSource({ maxzoom: -1 })], BBOX, [6, 6], {}), {
     name: 'RangeError',
     message: /maxzoom must be an integer/

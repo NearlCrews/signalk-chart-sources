@@ -21,6 +21,8 @@
     "allowUnusedLabels": false,
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "isolatedDeclarations": true,
     "skipLibCheck": true
   },
   "include": ["src"]

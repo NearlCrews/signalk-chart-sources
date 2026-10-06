@@ -1,42 +1,12 @@
 import { MIN_TILE_EDGE_METERS, webMercatorTileBounds } from './mercator.js'
+import { bboxRequestUrl, MAPLIBRE_BBOX_TOKEN, substituteZXY, withoutTrailingSlashes } from './request.js'
 import type { ChartSource } from './types.js'
-import { assertSourceId, assertTileCoordinate, containsInvalidUrlCharacter, validateChartSource } from './validate.js'
+import { assertSourceId, assertTileCoordinate, checkedSource, containsInvalidUrlCharacter } from './validate.js'
 
 /** Reject a z/x/y outside the tile pyramid (defense in depth; the container validates first). */
 function assertInRange(source: ChartSource, z: number, x: number, y: number): void {
-  validateChartSource(source)
   assertTileCoordinate(z, x, y)
   if (z < source.minzoom || z > source.maxzoom) throw new RangeError(`z ${z} out of ${source.id} range`)
-}
-
-/**
- * Copy a candidate source into plain data properties so validation and expansion read the same
- * values. A source built on accessors could otherwise hand the validator a compliant URL and this
- * builder a different, unvalidated one. Non-objects pass through for the validator to reject with
- * its own message.
- */
-function materialize(source: ChartSource): ChartSource {
-  if (typeof source !== 'object' || source === null) return source
-  const upstream: unknown = source.upstream
-  if (typeof upstream !== 'object' || upstream === null) return { ...source }
-  return { ...source, upstream: { ...upstream } as ChartSource['upstream'] }
-}
-
-const ZXY_TOKEN = /\{(z|x|y)\}/g
-
-/**
- * Drop trailing slashes from a base URL. ArcGIS needs it because the export path is appended and a
- * kept slash would double up. WMS gets the same treatment so one base cannot produce two spellings
- * of the same request, which would split a proxy's cache for no benefit.
- */
-function withoutTrailingSlashes(value: string): string {
-  let end = value.length
-  while (end > 0 && value.charCodeAt(end - 1) === 47) end--
-  return value.slice(0, end)
-}
-
-function substituteZXY(template: string, z: number, x: number, y: number): string {
-  return template.replace(ZXY_TOKEN, (_, key) => String(key === 'z' ? z : key === 'x' ? x : y))
 }
 
 /**
@@ -66,40 +36,45 @@ function mercatorBboxParam(z: number, x: number, y: number): string {
  * zoom falls outside the source range.
  */
 export function expandUpstreamUrl(candidate: ChartSource, z: number, x: number, y: number): string {
-  const source = materialize(candidate)
+  // A validated snapshot, so the builder reads exactly the values that were validated.
+  const { source } = checkedSource(candidate)
   assertInRange(source, z, x, y)
   const u = source.upstream
+  // No default arm, as in upstreamTileTemplate: the string return type already makes the compiler
+  // reject a mode this switch does not handle.
   switch (u.mode) {
     case 'xyz':
     case 'wmts':
       return substituteZXY(u.urlTemplate, z, x, y)
-    case 'wms': {
-      // Raw parameter text, matching the webapp wmsTiles template byte for byte (no URL encoding of
-      // the comma-listed LAYERS or the STYLES), so the proxied and direct paths request the same
-      // image. The webapp leaves BBOX as MapLibre's {bbox-epsg-3857} token and MapLibre derives each
-      // edge independently, so the two paths can still differ in a coordinate's final digit.
-      const bbox = mercatorBboxParam(z, x, y)
-      return (
-        `${withoutTrailingSlashes(u.base)}?SERVICE=WMS&VERSION=${u.version}&REQUEST=GetMap&LAYERS=${u.layers}` +
-        `&CRS=EPSG:3857&BBOX=${bbox}&WIDTH=${source.tileSize}&HEIGHT=${source.tileSize}` +
-        `&FORMAT=${u.format}&TRANSPARENT=${u.transparent}&STYLES=${u.styles}`
-      )
-    }
-    case 'arcgis': {
-      const bbox = mercatorBboxParam(z, x, y)
-      return (
-        `${withoutTrailingSlashes(u.base)}/export?bbox=${bbox}&bboxSR=3857&imageSR=3857` +
-        `&size=${source.tileSize},${source.tileSize}&dpi=96&format=png32&transparent=true&f=image`
-      )
-    }
+    case 'wms':
+    case 'arcgis':
+      return bboxRequestUrl(source.tileSize, u, mercatorBboxParam(z, x, y))
     case 'style':
       return u.styleUrl
-    default: {
-      // validateChartSource already rejects unknown modes, so this backstop is unreachable; the
-      // never assignment proves exhaustiveness at compile time.
-      const exhaustive: never = u
-      throw new RangeError(`unknown upstream mode: ${String((exhaustive as { mode?: unknown }).mode)}`)
-    }
+  }
+}
+
+/**
+ * Return the tile URL template a renderer such as MapLibre requests directly: the XYZ or WMTS template
+ * as written, or the WMS GetMap or ArcGIS export request with MapLibre's {bbox-epsg-3857} token where
+ * expandUpstreamUrl writes the tile box. Filling that token with a tile's box reproduces
+ * expandUpstreamUrl for the tile, which is what keeps the direct and proxied paths on one request.
+ *
+ * @throws {TypeError | RangeError} When the source definition is invalid, and TypeError for a style
+ * source, which has a style document rather than a tile template.
+ */
+export function upstreamTileTemplate(candidate: ChartSource): string {
+  const { source } = checkedSource(candidate)
+  const u = source.upstream
+  switch (u.mode) {
+    case 'xyz':
+    case 'wmts':
+      return u.urlTemplate
+    case 'wms':
+    case 'arcgis':
+      return bboxRequestUrl(source.tileSize, u, MAPLIBRE_BBOX_TOKEN)
+    case 'style':
+      throw new TypeError(`${source.id} is a style source and has no tile template`)
   }
 }
 
