@@ -73,7 +73,8 @@ body:
     id: package-version
     attributes:
       label: Package version
-      placeholder: 0.7.1
+      description: The output of `npm ls signalk-chart-sources` in the affected project.
+      placeholder: signalk-chart-sources@x.y.z
     validations:
       required: true
 
@@ -81,7 +82,8 @@ body:
     id: node-version
     attributes:
       label: Node.js version
-      placeholder: 24.18.0
+      description: The output of `node --version`.
+      placeholder: vX.Y.Z
     validations:
       required: true
 

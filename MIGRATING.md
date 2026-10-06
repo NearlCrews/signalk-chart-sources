@@ -1,5 +1,72 @@
 # Migration guide
 
+## Migrating from 0.7.x to 0.8.0
+
+Stricter validation of consumer-supplied sources, corrected catalog credits, and two new helpers.
+Existing `^0.7.x` dependency ranges do not select 0.8.0, so consumers can migrate and test
+deliberately. Consumers that only read the built-in catalog and pass valid inputs need no code
+changes, but cached tiles, displayed credits, and some tile counts move.
+
+Validation now rejects input it used to accept:
+
+- A `coverage` region that reaches outside the source's `bounds`. A renderer never requests a tile
+  outside the display envelope, so warming one fetched it for nothing. Clip the regions to the
+  bounds, or widen the bounds if they were wrong.
+- `attribution` markup other than plain text, character entities, and `<a href="https://...">text</a>`
+  links, optionally with `target="_blank"`. MapLibre renders attribution as HTML, so any other tag
+  was an injection path for an application that accepts third-party definitions. That application
+  should still sanitize the text or render it as text; the allowlist is defense in depth.
+- `%` in a WMS layer, style, or format value. The server decodes an escape after validation, so
+  `a%2Cb` reached it as two layers paired with one style.
+- A brace in a WMS layer, style, format, or base value, or in an ArcGIS base. MapLibre replaces its
+  own tokens, such as `{ratio}` and `{quadkey}`, anywhere in a tile template, so a renderer using
+  `upstreamTileTemplate` would request a different image than a cache using `expandUpstreamUrl`.
+- A URL host with a trailing dot or an empty label. `localhost.` resolves to the loopback interface
+  but slipped past the loopback check, and `tiles.example.` gave one host a second cache key.
+- A URL containing a backslash or an empty authority, such as `https:///tiles.example/{z}/{x}/{y}`.
+  The URL parser repairs both, which let a template carry a tile token in its host.
+- A source built on prototype properties, getters that change between reads, or `Object.create`.
+  `validateChartSource`, the tile helpers, and `estimateBytes` now read a source's own enumerable
+  properties once and work on that copy, as `expandUpstreamUrl` already did. Spread such a source
+  into a plain object before passing it in.
+- `estimateBytes` with an invalid box, zoom range, or averages object, even when the source list is
+  empty, and a later invalid source that shares an id with an earlier valid one. Both used to
+  return a number.
+
+Error messages escape control, format, and lone-surrogate characters in echoed input, so a test
+that matched a raw control character in a message needs the escaped form.
+
+Catalog changes a cache or renderer will see:
+
+- Attributions now follow what each upstream asks for: the full GEBCO 2026 acknowledgement with its
+  DOI, the EMODnet DTM 2024 release, the IHO sea areas' CC BY-NC-SA 4.0 license, UNESCO as creator
+  of the World Heritage marine sites, the GFS NSST analysis behind the sea surface temperature
+  layer, the OpenFreeMap credit for both basemaps, and the OpenStreetMap credit for seamarks. An
+  application keeping its own copy of any of these credits should update it.
+- `traffic-vessel-density` requests the annual-average layer instead of the monthly one, which,
+  requested without a time, showed a single month. Its title is now "Vessel density (annual
+  average)". Cached tiles for it are stale.
+- BlueTopo `bounds` move outward to `[-138.1, 16.785, -64.197, 59.551]`, recovering a strip along the
+  west edge.
+- The EMODnet quality and contour facets carry their own coverage, clipped to their bounds, and the
+  NOAA ENC Weddell Sea region stops at the service's southern edge. Over the whole world at zooms 0
+  to 12, each EMODnet facet falls from 2,245,846 to 2,191,191 tiles, and each NOAA ENC source from
+  2,267,591 to 2,267,078.
+- `tileForLngLat` converts degrees to radians the way the Rust tile cache does, so a point within a
+  few units in the last place of a tile boundary may land one tile over. Counts can shift by the odd
+  boundary tile, and agreement with the Rust enumeration improves.
+
+The package no longer has a `prepare` script, so installing it from a Git URL no longer builds it.
+Registry installs are unaffected.
+
+`coversBbox`, `coversPoint`, and `upstreamTileTemplate` are new and additive. A consumer that tests
+coverage with `tileCountInBbox(...) > 0`, or with a tiny box around a point, can switch to
+`coversBbox`, or `coversPoint` with the same zoom range, for the same answer at a fraction of the
+cost. Without a zoom range `coversPoint` ignores zoom, so a coarse source such as GEBCO would count
+as covering a harbor-scale request. A renderer that builds
+its own WMS or ArcGIS tile template can switch to `upstreamTileTemplate`, which honors the source's
+tile size, format, and transparency instead of assuming 256 pixel transparent PNG.
+
 ## Migrating from 0.6.x to 0.7.0
 
 Twenty new sources, an optional `maxAgeSeconds` field, and stricter host validation. Existing
