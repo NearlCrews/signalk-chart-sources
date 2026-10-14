@@ -21,6 +21,20 @@ export const src = (id: string): ChartSource => {
   return source
 }
 
+/**
+ * Plant entries on a shared prototype for the length of one callback, and remove them afterwards even
+ * when it throws, so a pollution test cannot leak into the tests after it.
+ */
+export const withPrototypeEntries = (prototype: object, planted: object, run: () => void): void => {
+  const target = prototype as Record<PropertyKey, unknown>
+  try {
+    Object.assign(target, planted)
+    run()
+  } finally {
+    for (const key of Reflect.ownKeys(planted)) delete target[key]
+  }
+}
+
 /** A deterministic generator of values in [0, 1), so a property test replays the same samples. */
 export const seededRandom = (seed: number): (() => number) => {
   let state = seed

@@ -16,7 +16,7 @@ import {
 } from '../src/mercator.js'
 import type { ChartSource, LngLatBbox, ZoomRange } from '../src/types.js'
 import { checkedSource, registerCatalogSource, validateChartSource } from '../src/validate.js'
-import { makeSource, seededRandom, src } from './fixtures.js'
+import { makeSource, seededRandom, src, withPrototypeEntries } from './fixtures.js'
 
 const WORLD: LngLatBbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
 
@@ -37,7 +37,8 @@ test('tileForLngLat returns 0,0 at zoom 0', () => {
 })
 
 test('tileForLngLat floors to the slippy tile containing the point', () => {
-  // null island at zoom 1 is the bottom-right of the top-left quadrant boundary: x=1, y=1.
+  // Null island is the corner all four zoom 1 tiles share, and flooring assigns it to the south-east
+  // tile: x 1, y 1.
   assert.deepEqual(tileForLngLat(0, 0, 1), { x: 1, y: 1 })
   // far north-west corner is tile 0,0; far south-east corner is tile 3,3 at zoom 2.
   assert.deepEqual(tileForLngLat(-180, MAX_MERCATOR_LAT, 2), { x: 0, y: 0 })
@@ -49,6 +50,13 @@ test('tileForLngLat clamps latitude to the Mercator limit and stays in range', (
   const atLimit = tileForLngLat(0, MAX_MERCATOR_LAT, 4)
   assert.deepEqual(beyond, atLimit, 'a latitude beyond the limit clamps to the limit tile')
   assert.ok(beyond.y >= 0 && beyond.y < 2 ** 4)
+})
+
+test('the east and south edges of the world map to the last tile, not one past it', () => {
+  // Longitude 180 and the southern Mercator limit floor to 2^z, one past the last index, so the
+  // index clamp is what keeps them inside the pyramid.
+  assert.deepEqual(tileForLngLat(180, -MAX_MERCATOR_LAT, 2), { x: 3, y: 3 })
+  assert.deepEqual(tileForLngLat(180, 0, 30), { x: 2 ** 30 - 1, y: 2 ** 29 })
 })
 
 test('an out-of-range longitude lands on the edge tile via the index clamp', () => {
@@ -200,7 +208,7 @@ test('boundary inclusivity is directional: the east and south edges take in the 
   // so a box whose east or south edge sits on a boundary reaches the far tile, while one whose west
   // or north edge sits there does not. Pinned because the behavior reads as symmetric and is not.
   const axis = (bbox: LngLatBbox, key: 'x' | 'y'): number[] =>
-    [...new Set(tilesInBbox(makeSource(), bbox, [1, 1]).map((tile) => tile[key]))].sort()
+    [...new Set(tilesInBbox(makeSource(), bbox, [1, 1]).map((tile) => tile[key]))].sort((a, b) => a - b)
 
   assert.deepEqual(axis([-10, -10, 0, 10], 'x'), [0, 1], 'an east edge on lng 0 includes the eastern tile')
   assert.deepEqual(axis([0, -10, 10, 10], 'x'), [1], 'a west edge on lng 0 excludes the western tile')
@@ -243,6 +251,48 @@ test('maxTiles is validated at call time, before any counting work', () => {
   }
   // A box whose count would overflow must still report the unusable maxTiles, not the overflow.
   assert.throws(() => tilesInBbox(makeSource(), WORLD, [30, 30], { maxTiles: -1 }), /maxTiles must be a positive/)
+})
+
+test('options must be an object, and only its own maxTiles counts', () => {
+  // A number passed where the options belong is the likeliest slip, and it used to fall back to the
+  // million-tile default instead of the cap the caller meant.
+  for (const options of [100, 'x', null, []]) {
+    assert.throws(
+      () => tilesInBbox(makeSource(), [-1, -1, 1, 1], [1, 1], options as never),
+      { name: 'TypeError', message: /options must be an object/ },
+      JSON.stringify(options)
+    )
+    assert.throws(() => iterateTilesInBbox(makeSource(), [-1, -1, 1, 1], [1, 1], options as never), TypeError)
+  }
+  // A maxTiles planted on Object.prototype must not lift the default cap for a call that sets none.
+  const limit = new RegExp(`exceeds maxTiles ${DEFAULT_MAX_ENUMERATED_TILES}$`)
+  withPrototypeEntries(Object.prototype, { maxTiles: Number.MAX_SAFE_INTEGER }, () => {
+    assert.throws(() => tilesInBbox(makeSource(), WORLD, [11, 11]), limit)
+    assert.throws(() => iterateTilesInBbox(makeSource(), WORLD, [11, 11], {}), limit)
+  })
+})
+
+test('the box and zoom range are read once, so neither can change after validation', () => {
+  // An own iterator that disagrees with the indices, or an index getter that answers differently on a
+  // later read, must not pass the check with one value and reach the tile math with another.
+  const honestBox: LngLatBbox = [0, 0, 1, 1]
+  const honest = tileCountInBbox(makeSource(), honestBox, [4, 4])
+  const iterating = Object.assign([0, 0, 1, 1], {
+    *[Symbol.iterator]() {
+      yield* [10, 0, 10, 10]
+    }
+  }) as unknown as LngLatBbox
+  assert.equal(tileCountInBbox(makeSource(), iterating, [4, 4]), honest)
+  assert.deepEqual(tilesInBbox(makeSource(), iterating, [4, 4]), tilesInBbox(makeSource(), honestBox, [4, 4]))
+
+  let reads = 0
+  const zooms = [4, 4]
+  Object.defineProperty(zooms, 1, { enumerable: true, get: () => (++reads === 1 ? 4 : Number.NaN) })
+  assert.equal(tileCountInBbox(makeSource(), honestBox, zooms as unknown as ZoomRange), honest)
+  assert.equal(reads, 1)
+  reads = 0
+  assert.equal(coversPoint(makeSource(), 0.5, 0.5, zooms as unknown as ZoomRange), true)
+  assert.equal(reads, 1)
 })
 
 test('iterateTilesInBbox rejects bad input when it is called, not when it is first advanced', () => {
@@ -577,14 +627,10 @@ test('a polluted Object.prototype cannot supply optional source fields', () => {
     group: { id: '', title: '' },
     tileJsonUrl: 'http://insecure.example/tiles.json'
   }
-  const prototype = Object.prototype as unknown as Record<string, unknown>
-  try {
-    Object.assign(prototype, planted)
+  withPrototypeEntries(Object.prototype, planted, () => {
     assert.deepEqual(measure(), clean)
     assert.doesNotThrow(() => validateChartSource(makeSource()))
-  } finally {
-    for (const key of Object.keys(planted)) delete prototype[key]
-  }
+  })
   assert.equal(clean.snapshotTtl, undefined)
 })
 

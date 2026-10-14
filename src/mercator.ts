@@ -1,12 +1,14 @@
 import type { ChartSource, LngLatBbox, MercatorBbox, TileEnumerationOptions, ZoomRange, ZXY } from './types.js'
 import {
   assertLngLat,
-  assertLngLatBbox,
+  assertRecord,
   assertTileCoordinate,
   assertZoom,
-  assertZoomRange,
+  checkedBbox,
   checkedSource,
+  checkedZoomRange,
   MAX_TILE_ZOOM,
+  ownValue,
   type PreparedSource,
   splitValidBbox
 } from './validate.js'
@@ -26,12 +28,17 @@ export function webMercatorTileBounds(z: number, x: number, y: number): Mercator
   return [minX, minY, maxX, maxY]
 }
 
+/**
+ * The Web Mercator latitude limit in degrees, where the projection's square ends. Tile math clamps a
+ * latitude beyond it, and coversPoint answers false there.
+ */
 export const MAX_MERCATOR_LAT = 85.0511287798066
 
 /**
- * The smallest edge magnitude a real tile can produce, which is the tile size at MAX_TILE_ZOOM. Any
- * coordinate below this is floating-point residue from an edge that is mathematically zero, never a
- * genuine tile boundary. Derived rather than written as a literal so raising MAX_TILE_ZOOM moves it.
+ * The tile size at MAX_TILE_ZOOM, and so the smallest magnitude a genuine tile edge other than zero
+ * can have. An edge that is mathematically zero arrives as floating-point residue many orders of
+ * magnitude smaller, so a threshold well below this one, such as half of it, tells the two apart.
+ * Derived rather than written as a literal so raising MAX_TILE_ZOOM moves it.
  */
 export const MIN_TILE_EDGE_METERS: number = (2 * ORIGIN) / 2 ** MAX_TILE_ZOOM
 
@@ -66,6 +73,7 @@ export function tileForLngLat(lng: number, lat: number, z: number): Readonly<{ x
 
 type TileRange = Readonly<{ z: number; x0: number; x1: number; y0: number; y1: number }>
 
+/** The maxTiles tilesInBbox and iterateTilesInBbox apply when the caller sets none. */
 export const DEFAULT_MAX_ENUMERATED_TILES = 1_000_000
 
 /**
@@ -122,31 +130,28 @@ export function clipRegions(
 /** The deepest zoom a source serves. vectorMaxzoom is validated to sit within its zoom range. */
 const zoomCeiling = (source: ChartSource): number => source.vectorMaxzoom ?? source.maxzoom
 
-/** Validate a zoom range and report whether it shares any zoom with those the source serves. */
-function servesAnyZoom(source: ChartSource, zoomRange: ZoomRange): boolean {
-  assertZoomRange(zoomRange)
-  return zoomRange[0] <= zoomCeiling(source) && source.minzoom <= zoomRange[1]
-}
+/** Report whether a validated zoom range shares any zoom with those the source serves. */
+const servesAnyZoom = (source: ChartSource, zoomRange: ZoomRange): boolean =>
+  zoomRange[0] <= zoomCeiling(source) && source.minzoom <= zoomRange[1]
 
 type CoveredClips = Readonly<{ clips: readonly LngLatBbox[]; zmin: number; zmax: number }>
 
 /**
- * The request box clipped to a source's regions, over the zooms both share, or null when either is
- * empty. Both inputs are validated first, and the zooms are settled before any clipping they make
- * unnecessary. maxClips stops the clipping early for a caller that only asks whether anything is left.
+ * The checked box clipped to a source's regions, over the zooms both share, or null when either is
+ * empty. The zooms are settled before any clipping they make unnecessary. maxClips stops the clipping
+ * early for a caller that only asks whether anything is left.
  */
 function coveredClips(
   prepared: PreparedSource,
-  bbox: LngLatBbox,
-  zoomRange: ZoomRange,
+  box: LngLatBbox,
+  zooms: ZoomRange,
   maxClips?: number
 ): CoveredClips | null {
   const { source, regions } = prepared
-  assertLngLatBbox(bbox)
-  if (!servesAnyZoom(source, zoomRange)) return null
-  const clips = clipRegions(regions, bbox, MAX_MERCATOR_LAT, maxClips)
+  if (!servesAnyZoom(source, zooms)) return null
+  const clips = clipRegions(regions, box, MAX_MERCATOR_LAT, maxClips)
   if (clips.length === 0) return null
-  return { clips, zmin: Math.max(zoomRange[0], source.minzoom), zmax: Math.min(zoomRange[1], zoomCeiling(source)) }
+  return { clips, zmin: Math.max(zooms[0], source.minzoom), zmax: Math.min(zooms[1], zoomCeiling(source)) }
 }
 
 function tileRange(clip: LngLatBbox, z: number): TileRange {
@@ -196,8 +201,8 @@ function disjointRanges(ranges: readonly TileRange[]): TileRange[] {
   return out
 }
 
-function coveredRanges(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): TileRange[] {
-  const covered = coveredClips(checkedSource(source), bbox, zoomRange)
+function coveredRanges(prepared: PreparedSource, box: LngLatBbox, zooms: ZoomRange): TileRange[] {
+  const covered = coveredClips(prepared, box, zooms)
   if (covered === null) return []
   const ranges: TileRange[] = []
   for (let z = covered.zmin; z <= covered.zmax; z++) {
@@ -215,9 +220,14 @@ function countRanges(ranges: readonly TileRange[]): number {
   return count
 }
 
-function enumerationLimit(options: TileEnumerationOptions): number {
-  const limit = options.maxTiles ?? DEFAULT_MAX_ENUMERATED_TILES
-  if (!Number.isSafeInteger(limit) || limit <= 0) {
+/**
+ * The caller's maxTiles, else the default. An own property only, so a maxTiles planted on a polluted
+ * Object.prototype cannot lift the defensive cap for every call that leaves it unset.
+ */
+function enumerationLimit(options: unknown): number {
+  assertRecord(options, 'options')
+  const limit = ownValue(options, 'maxTiles') ?? DEFAULT_MAX_ENUMERATED_TILES
+  if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit <= 0) {
     throw new RangeError('maxTiles must be a positive safe integer')
   }
   return limit
@@ -231,7 +241,17 @@ function enumerationLimit(options: TileEnumerationOptions): number {
  * range, or the resulting total is out of range.
  */
 export function tileCountInBbox(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): number {
-  return countRanges(coveredRanges(source, bbox, zoomRange))
+  return countCoveredTiles(checkedSource(source), checkedBbox(bbox), checkedZoomRange(zoomRange))
+}
+
+/**
+ * tileCountInBbox over inputs already checked, for estimateBytes, which checks the box and zoom range
+ * once and counts every source over the same copies. Internal to the package.
+ *
+ * @throws {RangeError} When the total exceeds Number.MAX_SAFE_INTEGER.
+ */
+export function countCoveredTiles(prepared: PreparedSource, box: LngLatBbox, zooms: ZoomRange): number {
+  return countRanges(coveredRanges(prepared, box, zooms))
 }
 
 /**
@@ -244,7 +264,7 @@ export function tileCountInBbox(source: ChartSource, bbox: LngLatBbox, zoomRange
  */
 export function coversBbox(source: ChartSource, bbox: LngLatBbox, zoomRange: ZoomRange): boolean {
   // One clip settles the answer, so the clipping stops at the first.
-  return coveredClips(checkedSource(source), bbox, zoomRange, 1) !== null
+  return coveredClips(checkedSource(source), checkedBbox(bbox), checkedZoomRange(zoomRange), 1) !== null
 }
 
 /**
@@ -264,11 +284,11 @@ export function coversBbox(source: ChartSource, bbox: LngLatBbox, zoomRange: Zoo
 export function coversPoint(source: ChartSource, lng: number, lat: number, zoomRange?: ZoomRange): boolean {
   const { source: checked, regions } = checkedSource(source)
   assertLngLat(lng, lat)
-  if (zoomRange !== undefined && !servesAnyZoom(checked, zoomRange)) return false
+  if (zoomRange !== undefined && !servesAnyZoom(checked, checkedZoomRange(zoomRange))) return false
   if (lng < -180 || lng > 180 || Math.abs(lat) > MAX_MERCATOR_LAT) return false
   // The two spellings of the antimeridian are one line, so a point on it lies in any region touching
-  // either. The regions are already split there, so each runs west to east. Indexed, so this hot
-  // per-point check allocates nothing.
+  // either. The regions are already split there, so each runs west to east. Indexed, so the walk in
+  // this hot per-point check allocates nothing.
   const antimeridian = Math.abs(lng) === 180
   for (let index = 0; index < regions.length; index++) {
     const region = regions[index]
@@ -295,7 +315,7 @@ function enumerableRanges(
   // Check the caller's own limit before doing any work, so an unusable maxTiles reports itself
   // instead of being masked by an unsafe-total error from a large box.
   const limit = enumerationLimit(options)
-  const ranges = coveredRanges(source, bbox, zoomRange)
+  const ranges = coveredRanges(checkedSource(source), checkedBbox(bbox), checkedZoomRange(zoomRange))
   const total = countRanges(ranges)
   if (total > limit) throw new RangeError(`tile enumeration ${total} exceeds maxTiles ${limit}`)
   return ranges
@@ -306,8 +326,9 @@ function enumerableRanges(
  * maxTiles when the call is made rather than when the generator is first advanced, so a rejected
  * request fails closed even for a caller that never iterates.
  *
- * @throws {TypeError | RangeError} When the source definition is invalid, when the box, the zoom
- * range, or maxTiles is out of range, or when the total exceeds maxTiles.
+ * @throws {TypeError | RangeError} When the source definition is invalid, when options is not an
+ * object, when the box, the zoom range, or maxTiles is out of range, or when the total exceeds
+ * maxTiles.
  */
 export function iterateTilesInBbox(
   source: ChartSource,

@@ -1,5 +1,5 @@
-// One definition of every upstream chart and raster overlay source, shared by the Binnacle
-// chartplotter webapp and the Chart Locker tile cache. Data and pure helpers only.
+// The public types of the chart-source catalog and its helpers, shared by the Binnacle chartplotter
+// webapp and the Chart Locker tile cache. Types only: the catalog itself lives in registry.ts.
 
 /** A geographic box in degrees as [west, south, east, north]. west > east crosses the antimeridian. */
 export type LngLatBbox = readonly [west: number, south: number, east: number, north: number]
@@ -59,7 +59,12 @@ export interface ChartSource {
   readonly maxzoom: number
   /** Native vector-tile maximum zoom, distinct from the MapLibre overzoom render ceiling. */
   readonly vectorMaxzoom?: number
-  /** Geographic display envelope. Omitted means worldwide. May cross the antimeridian. */
+  /**
+   * Geographic display envelope. Omitted means worldwide. May cross the antimeridian, which the tile
+   * helpers handle, but MapLibre's source bounds read a west edge east of the east edge as an empty
+   * box, so a renderer must widen a crossing envelope before handing it over. No catalog source
+   * carries one.
+   */
   readonly bounds?: LngLatBbox
   /**
    * Optional warming and estimate coverage, preferred over bounds for a service whose useful
@@ -68,7 +73,7 @@ export interface ChartSource {
    * is still counted and enumerated once.
    */
   readonly coverage?: readonly LngLatBbox[]
-  /** Conservative first-download estimate used until a measured average exists. */
+  /** Conservative first-download estimate, in bytes per tile, used until a measured average exists. */
   readonly fallbackTileBytes?: number
   /**
    * How long a fetched tile stays usable, in seconds. Absent means the source is static and a cache
@@ -78,10 +83,16 @@ export interface ChartSource {
    * this; bathymetry and chart display do not.
    */
   readonly maxAgeSeconds?: number
+  /**
+   * The credit a renderer displays, as HTML because MapLibre inserts it as markup. Validation accepts
+   * plain text, character entities, and `<a href="https://...">` links, optionally with
+   * `target="_blank"`, and nothing else. That allowlist is defense in depth, not a sanitizer.
+   */
   readonly attribution: string
   readonly group?: ChartGroup
 }
 
+/** Options for tilesInBbox and iterateTilesInBbox. Only the object's own properties are read. */
 export interface TileEnumerationOptions {
   /** Maximum tiles the call may enumerate before it fails closed. */
   readonly maxTiles?: number

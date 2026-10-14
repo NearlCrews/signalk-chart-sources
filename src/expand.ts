@@ -6,7 +6,9 @@ import { assertSourceId, assertTileCoordinate, checkedSource, containsInvalidUrl
 /** Reject a z/x/y outside the tile pyramid (defense in depth; the container validates first). */
 function assertInRange(source: ChartSource, z: number, x: number, y: number): void {
   assertTileCoordinate(z, x, y)
-  if (z < source.minzoom || z > source.maxzoom) throw new RangeError(`z ${z} out of ${source.id} range`)
+  if (z < source.minzoom || z > source.maxzoom) {
+    throw new RangeError(`z ${z} is outside the ${source.id} zoom range ${source.minzoom} to ${source.maxzoom}`)
+  }
 }
 
 /**
@@ -93,7 +95,9 @@ export function proxyTileTemplate(pluginBase: string, sourceId: string): string 
   const base = withoutTrailingSlashes(pluginBase)
   if (base === '') throw new TypeError('pluginBase must not be empty')
   if (containsInvalidUrlCharacter(base) || INVALID_PLUGIN_BASE_CHARACTER.test(base)) {
-    throw new TypeError('pluginBase must not contain whitespace, controls, ?, #, braces, or backslashes')
+    throw new TypeError(
+      'pluginBase must not contain whitespace, controls, invisible characters, ?, #, braces, or backslashes'
+    )
   }
   assertSourceId(sourceId)
   return `${base}/tile/${sourceId}/{z}/{x}/{y}`

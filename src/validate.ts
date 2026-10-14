@@ -9,30 +9,34 @@ export const WMS_VERSION = '1.3.0'
 
 const SOURCE_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/
 // Semicolon joins the separator characters because CGI-style parsers have long accepted it as an
-// alternative to "&", and equals would end the parameter name a server reads. Percent is here
-// because the server decodes escapes after splitting the query, so "%2C" would add a layer the
-// STYLES pairing never counted and "%0A" would deliver a control character this check bans. Braces
-// are checked on the whole request instead, by assertOnlyBboxToken.
+// alternative to "&", and equals would end the parameter name a server reads. Plus is here because
+// form decoding turns it into a space. Percent is here because the server decodes escapes after
+// splitting the query, so "%2C" would add a layer the STYLES pairing never counted and "%0A" would
+// deliver a control character this check bans. Braces are checked on the whole request instead, by
+// assertOnlyBboxToken.
 const INVALID_QUERY_VALUE_CHARACTER = /[%&?#+;=]/
 /**
  * Longest rejected value echoed back in an error, so a hostile input cannot flood a log. Counted in
  * UTF-16 code units, unlike the wire budgets below: the echo is log text, so a loose bound is fine.
  */
 const MAX_ECHOED_VALUE = 64
-// Characters escaped in an echoed value: controls and the line and paragraph separators, so a line
-// break cannot forge a second log line; format characters, so a bidirectional override cannot reorder
-// what the reader sees; and lone surrogates, which the truncation can leave behind by splitting a pair.
-const UNSAFE_ECHO_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}\p{Cf}\p{Cs}]/gu
+// Controls, format characters, lone surrogates, and the rest of the default-ignorable set: everything
+// that is invisible on screen. One class for the echo and URL checks below, so the two cannot drift.
+const INVISIBLE_CHARACTERS = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Default_Ignorable_Code_Point}`
+// Escaped in an echoed value: every invisible character, so a bidirectional override cannot reorder the
+// message, a rejected value cannot hide what got it rejected, and a pair split by truncation leaves no
+// lone surrogate; and the line and paragraph separators, so a line break cannot forge a log line.
+const UNSAFE_ECHO_CHARACTER = new RegExp(String.raw`[${INVISIBLE_CHARACTERS}\p{Zl}\p{Zp}]`, 'gu')
 // Any control character at all, then the narrower question of whether a disallowed one is present.
 // The cheap test carries the common case; the double negation reads as "a control that is not tab,
-// line feed, or carriage return", which a character class cannot say without literal controls that
-// the linter rejects.
+// line feed, or carriage return", which a character class cannot say without naming control
+// characters, and the linter rejects those even written as escapes.
 const TEXT_CONTROL = /\p{Cc}/u
 const DISALLOWED_TEXT_CONTROL = /[^\P{Cc}\t\n\r]/u
-// Whitespace plus every invisible character class a URL must not carry. Format characters matter
-// most: IDNA drops them, so a host carrying a zero-width space validates as written yet
-// resolves to a different host.
-const INVALID_URL_CHARACTER = /[\s\p{Cc}\p{Cf}\p{Cs}]/u
+// Whitespace and every invisible character. IDNA drops format characters and the rest of the
+// default-ignorable set, such as variation selectors and the Hangul fillers, so a host carrying one
+// validates as written yet resolves to another host.
+const INVALID_URL_CHARACTER = new RegExp(String.raw`[\s${INVISIBLE_CHARACTERS}]`, 'u')
 const UTF8 = new TextEncoder()
 
 const MAX_SOURCE_ID_BYTES = 256
@@ -54,6 +58,14 @@ export function assertRecord(value: unknown, label: string): asserts value is Re
   if (!isRecord(value)) throw new TypeError(`${label} must be an object`)
 }
 
+/**
+ * Read a caller-supplied record's own value for a key, or undefined. A value it only inherits, from
+ * its own prototype or a polluted Object.prototype, is never read.
+ */
+export function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined
+}
+
 function escapeEchoCharacter(character: string): string {
   const codePoint = character.codePointAt(0) ?? 0
   const hex = codePoint.toString(16).toUpperCase()
@@ -61,19 +73,20 @@ function escapeEchoCharacter(character: string): string {
 }
 
 /**
- * Describe a rejected value for an error message without trusting its toString, its length, or its
- * characters. Truncation runs first so the escapes cannot be cut in half.
+ * Describe a rejected value for an error message without running its code or trusting its length or
+ * its characters. A string is quoted, so an empty one still shows and "123" reads apart from 123. An
+ * object or function is named by its type alone: its toString, valueOf, and Symbol.toPrimitive are
+ * caller code that can throw or run slowly, and ["s"] would otherwise read as the valid id s.
+ * Truncation runs first so the escapes cannot be cut in half.
  */
 export function describeValue(value: unknown): string {
-  let text: string
-  try {
-    text = String(value)
-  } catch {
-    text = Object.prototype.toString.call(value)
-  }
+  if (typeof value === 'function' || (typeof value === 'object' && value !== null)) return `[${typeof value}]`
+  const quoted = typeof value === 'string'
+  const text = quoted ? value : String(value)
   const truncated = text.length > MAX_ECHOED_VALUE
   const shown = (truncated ? text.slice(0, MAX_ECHOED_VALUE) : text).replace(UNSAFE_ECHO_CHARACTER, escapeEchoCharacter)
-  return truncated ? `${shown}...` : shown
+  const described = quoted ? `"${shown}"` : shown
+  return truncated ? `${described}...` : described
 }
 
 /**
@@ -170,11 +183,13 @@ export function assertZoom(z: unknown, label = 'zoom'): asserts z is number {
   }
 }
 
-export function assertZoomRange(value: unknown): asserts value is ZoomRange {
+/** Require a valid zoom range. It takes a private copy, from checkedZoomRange. */
+function assertZoomRange(value: unknown): asserts value is ZoomRange {
   if (!Array.isArray(value) || value.length !== 2 || !Object.hasOwn(value, 0) || !Object.hasOwn(value, 1)) {
     throw new RangeError('zoom range must contain exactly two values')
   }
-  const [zmin, zmax] = value
+  const zmin: unknown = value[0]
+  const zmax: unknown = value[1]
   assertZoom(zmin, 'minimum zoom')
   assertZoom(zmax, 'maximum zoom')
   if (zmin > zmax) throw new RangeError('minimum zoom must not exceed maximum zoom')
@@ -191,7 +206,8 @@ export function assertTileCoordinate(z: number, x: number, y: number): void {
   }
 }
 
-export function assertLngLatBbox(value: unknown, label = 'bbox'): asserts value is LngLatBbox {
+/** Require a valid box. It takes a private copy, from snapshotSource or checkedBbox. */
+function assertLngLatBbox(value: unknown, label = 'bbox'): asserts value is LngLatBbox {
   const wrongShape = `${label} must contain four finite coordinates`
   if (!Array.isArray(value) || value.length !== 4) throw new RangeError(wrongShape)
   // Indexed rather than [0,1,2,3].every(...) plus value.every(...): a source may carry up to 64
@@ -214,6 +230,25 @@ export function assertLngLatBbox(value: unknown, label = 'bbox'): asserts value 
   // the wrap arm and read as a full 360 degree span.
   const longitudeSpan = west < east ? east - west : west > east ? 360 - west + east : 0
   if (longitudeSpan <= 0 || south >= north) throw new RangeError(`${label} must cover a non-zero area`)
+}
+
+// A caller's box or zoom range is copied once, by index, and only the copy is validated and used. The
+// asserts above and every later step read their input more than once, so a caller's own array, with
+// an index getter or an own iterator, could otherwise pass the check with one value and reach the tile
+// math with another.
+
+/** Validate a caller's box and return the private copy validated. */
+export function checkedBbox(value: unknown): LngLatBbox {
+  const box = copyBox(value)
+  assertLngLatBbox(box)
+  return box
+}
+
+/** Validate a caller's zoom range and return the private copy validated. */
+export function checkedZoomRange(value: unknown): ZoomRange {
+  const range = boundedCopy(value, 2)
+  assertZoomRange(range)
+  return range
 }
 
 /** Split a box at the antimeridian without revalidating: for boxes a validator already accepted. */
@@ -543,6 +578,11 @@ function assertValidSnapshot(source: unknown): asserts source is ChartSource {
  * Validate and narrow a built-in or consumer-supplied source. Only the source's own enumerable
  * properties count, as for every helper that takes a source: a field it inherits is absent.
  *
+ * The checks run on a copy read once from the source, so the assertion holds for the values read
+ * then. A source built on accessors can read differently afterwards, so validate plain data, such as
+ * parsed JSON, before relying on the narrowed type. The helpers never rely on it: each validates and
+ * works on its own copy.
+ *
  * @throws {TypeError | RangeError} When identity, bounded text, tile size, zooms, geography, the
  * optional byte and TTL counts, the group descriptor, HTTPS URLs, URL tokens, WMS parameters, or
  * style-host authorization are invalid.
@@ -551,11 +591,29 @@ export function validateChartSource(source: unknown): asserts source is ChartSou
   assertValidSnapshot(snapshotSource(source))
 }
 
-// Copy at most one entry past a list's bound, so an oversized list still fails its length check
-// without the copy itself walking a hostile length. slice keeps holes, so the dense check still sees
-// them.
-const boundedCopy = (value: unknown, max: number): unknown =>
-  Array.isArray(value) ? Array.prototype.slice.call(value, 0, max + 1) : value
+/**
+ * Copy a list into a plain array, reading each own entry once and at most one entry past the list's
+ * bound, so an oversized list still fails its length check without the copy walking a hostile length.
+ * A hole, or an entry the list only inherits from a polluted Array.prototype, stays a hole for the
+ * dense check to find. Copied by hand rather than with slice, which builds its result through the
+ * list's own constructor and Symbol.species, so a hostile list could choose what validation reads.
+ * Anything but an array passes through for the validator to reject.
+ */
+function boundedCopy(value: unknown, max: number, copyEntry?: (entry: unknown) => unknown): unknown {
+  if (!Array.isArray(value)) return value
+  const length = Math.min(value.length, max + 1)
+  const copy: unknown[] = []
+  for (let index = 0; index < length; index++) {
+    if (!Object.hasOwn(value, index)) continue
+    const entry: unknown = value[index]
+    copy[index] = copyEntry === undefined ? entry : copyEntry(entry)
+  }
+  // Only a list ending in holes leaves the copy short, so only then is the length written.
+  if (copy.length !== length) copy.length = length
+  return copy
+}
+
+const copyBox = (box: unknown): unknown => boundedCopy(box, 4)
 
 /**
  * Copy an object's own enumerable properties onto a null prototype, invoking each getter once. With no
@@ -566,9 +624,10 @@ const ownCopy = (value: Record<string, unknown>): Record<string, unknown> => ({ 
 /**
  * Copy a candidate source into plain data, reading every field exactly once, so validation and every
  * later use read the same values. A source built on accessors could otherwise hand the validator a
- * compliant field and the caller a different, unvalidated one. Only own enumerable properties are
- * copied, and the source, upstream, and group copies have null prototypes, so a field the candidate
- * inherits, from its own prototype or a polluted Object.prototype, is simply absent from the snapshot.
+ * compliant field and the caller a different, unvalidated one. Only own enumerable properties and own
+ * list entries are copied, and the source, upstream, and group copies have null prototypes, so a field
+ * the candidate inherits, from its own prototype or a polluted Object.prototype, is simply absent from
+ * the snapshot.
  * A source must therefore carry its fields as its own. Values that are not objects or arrays pass
  * through for the validator to reject with its own message.
  */
@@ -583,11 +642,8 @@ function snapshotSource(candidate: unknown): unknown {
     }
     copy['upstream'] = upstreamCopy
   }
-  if (bounds !== undefined) copy['bounds'] = boundedCopy(bounds, 4)
-  if (Array.isArray(coverage)) {
-    // map skips holes but keeps them in its result, so a sparse list still reaches the dense check.
-    copy['coverage'] = (boundedCopy(coverage, MAX_COVERAGE_BOXES) as unknown[]).map((box) => boundedCopy(box, 4))
-  }
+  if (bounds !== undefined) copy['bounds'] = copyBox(bounds)
+  if (coverage !== undefined) copy['coverage'] = boundedCopy(coverage, MAX_COVERAGE_BOXES, copyBox)
   if (isRecord(group)) copy['group'] = ownCopy(group)
   return copy
 }

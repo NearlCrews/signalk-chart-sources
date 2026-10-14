@@ -125,6 +125,19 @@ test('estimateBytes reads a supplied source once, so an accessor cannot change i
   assert.equal(reads, 1)
 })
 
+test('estimateBytes reads the box and zoom range once and prices every source over the same copy', () => {
+  // A getter that answers a valid box first and a different one afterwards must not price later
+  // sources over a box the up-front check never saw.
+  let reads = 0
+  const box = [-1, -1, 1, 1]
+  Object.defineProperty(box, 2, { enumerable: true, get: () => (++reads === 1 ? 1 : 179) })
+  const range: ZoomRange = [6, 6]
+  const custom = makeSource({ id: 'custom' })
+  const expected = estimateBytes(['seamark', custom], BBOX, range, {})
+  assert.equal(estimateBytes(['seamark', custom], box as unknown as LngLatBbox, range, {}), expected)
+  assert.equal(reads, 1)
+})
+
 test('estimateBytes accepts a whole source, so a consumer can price one it defined itself', () => {
   const custom = makeSource({ id: 'custom', fallbackTileBytes: 1_000 })
   const tiles = tileCountInBbox(custom, BBOX, [6, 6])
