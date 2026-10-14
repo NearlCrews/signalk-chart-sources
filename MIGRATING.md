@@ -1,5 +1,50 @@
 # Migration guide
 
+## Migrating from 0.8.x to 0.9.0
+
+Hardened input handling, corrected catalog credits, and bounds that keep every advertised edge.
+Existing `^0.8.x` dependency ranges do not select 0.9.0, so consumers can migrate and test
+deliberately. Consumers that only read the built-in catalog and pass valid inputs need no code
+changes, but displayed credits, one title, the catalog order, and some tile counts move.
+
+The helpers now reject input they used to accept:
+
+- An `options` argument to `tilesInBbox` or `iterateTilesInBbox` that is not an object. A number
+  such as `tilesInBbox(source, bbox, zooms, 100)` used to fall back silently to the 1,000,000-tile
+  default; pass `{ maxTiles: 100 }`. Only an own `maxTiles` counts, so one inherited from a prototype
+  is ignored.
+- A URL, `allowedHosts` entry, WMS layer, style, or format value, or `proxyTileTemplate` plugin base
+  containing any Unicode default-ignorable character, such as a variation selector, the combining
+  grapheme joiner, or a Hangul filler. IDNA drops these from a host, so the URL reached a different
+  host than the one validated. Titles and attribution still accept them.
+- A `bounds`, `coverage`, or `allowedHosts` list that only passed because of its own
+  `Symbol.species`, or a sparse list whose hole a polluted `Array.prototype` filled. Plain arrays and
+  parsed JSON are unaffected.
+
+Error messages quote a rejected string and name a rejected object or function as `[object]` or
+`[function]`, so a test matching the old message text needs the new form. For example,
+`invalid source id: ../x` is now `invalid source id: "../x"`, and the `expandUpstreamUrl` zoom error
+reads `z 13 is outside the depth-gebco zoom range 0 to 12`.
+
+Catalog changes a cache or renderer will see:
+
+- EMODnet Human Activities credits name CC BY 4.0 and their data originator, Cogea, or CETMAR for
+  `infra-wind-farms`. The Marine Regions boundary credits name CC BY 4.0, and the seamark credit adds
+  OpenSeaMap's CC BY-SA 2.0. An application keeping its own copy of any of these credits should
+  update it.
+- Bounds transcribed from an advertised envelope round outward. `mpa-emodnet`, `mpa-natura2000`, the
+  four `infra-*` sources, the EMODnet quality index and contours, and the four radar mosaics grow by
+  at most 0.01 degrees, and `traffic-vessel-density` reaches 86.81 north. World tile counts grow
+  slightly where a grown edge crosses into another tile: `infra-power-cables` at zooms 0 to 12 goes
+  from 6,900,804 to 6,904,426 tiles.
+- `weather-radar-conus` is titled "Contiguous US weather radar".
+- `mpa-noaa` moved next to the other protected-area sources, so `CHART_SOURCES` order changed. Look
+  sources up by id rather than by position.
+
+A renderer handed a consumer-supplied `bounds` that crosses the antimeridian must widen it, for
+example to `[-180, south, 180, north]`, before passing it to MapLibre, which reads a west edge east of
+the east edge as covering no tile. No catalog source carries such bounds.
+
 ## Migrating from 0.7.x to 0.8.0
 
 Stricter validation of consumer-supplied sources, corrected catalog credits, and two new helpers.

@@ -34,10 +34,17 @@ Mercator tile math, and conservative download estimates. It is not a Signal K pl
   validation and expansion both use.
 - `src/estimate.ts`: conservative planning estimates.
 - `scripts/check-upstreams.ts`: scheduled live source and capability checks.
+- `scripts/upstream-url.ts`: the monitor's request policy, covering the URL shape check it applies to
+  every request and redirect, which failures are transient enough to retry, and how a failure is
+  described.
+- `scripts/upstream-documents.ts`: the monitor's readers for WMS layer trees, advertised envelopes,
+  and tile image headers, kept free of network code so tests can run them on fixtures.
 - `scripts/package-smoke.mjs`: packed-tarball verification.
+- `scripts/expected-exports.mjs`: the runtime export list the tests and the package smoke share.
 - `scripts/audit-policy.mjs`: the reviewed development-only advisories the full audit accepts.
+- `scripts/check-audit.mjs`: feeds `npm audit --json` through that policy.
 - `scripts/check-workflows.mjs`: workflow permission, pinning, and publication invariants.
-- `scripts/records.mjs`: the plain-object guard the maintenance scripts share.
+- `scripts/records.mjs`: the plain-object guard and manifest reader the maintenance scripts share.
 
 ## Verification
 
@@ -59,12 +66,15 @@ from the build. `test:coverage` runs the whole suite under the coverage threshol
 only a faster local loop. `test:package` builds, packs, and smoke-tests the exact tarball.
 
 `audit:full` accepts only the advisories listed in `scripts/audit-policy.mjs` and fails on anything
-else, including an accepted advisory that is no longer reported. Never lower the audit level or run
+else, including an accepted advisory that is no longer reported, whose vulnerable range changed, or
+that npm can fix without a breaking change. Never lower the audit level or run
 `npm audit fix --force` to get past it. `audit:runtime` must stay clean: the package has no runtime
 dependencies.
 
-When a workflow changes, run actionlint with shellcheck on the path, and zizmor, locally (for
-example through `uvx`); the workflow-security workflow runs both on every workflow change.
+When a workflow changes, run actionlint locally with shellcheck on the path, and run zizmor with a
+GitHub token so its online audits run, for example through `uvx` with `GH_TOKEN` set from
+`gh auth token`. The workflow-security workflow runs both on every workflow change, and the online
+audits are the ones that confirm each pinned SHA matches the release in its comment.
 
 Run `npm run test:upstreams` when catalog data, source validation, or monitoring changes. It performs
 live network requests and is intentionally separate from normal pull-request checks.

@@ -42,14 +42,19 @@ byte estimate are all in scope.
   supports Node.js 22 or newer.
 - `@types/node` tracks the newest Node.js release, so the type checker accepts APIs newer than the
   Node.js 22 floor. CI runs the test suite on Node.js 22, which catches a newer-only API in the tests
-  at run time. `src/` may not use Node.js APIs at all, and Biome enforces that.
+  at run time. `src/` may not use Node.js APIs at all: Biome rejects Node.js module imports,
+  `process`, and Node-only globals such as `Buffer` there.
+- CI builds and tests on Linux, macOS, and Windows, so package scripts and maintenance scripts must
+  run on all three. Use Node.js rather than shell commands for file work, and run a dependency's
+  tool through the bin its `package.json` declares rather than through `node_modules/.bin`, whose
+  Windows entries are batch files.
 - The `typescript6` development dependency is TypeScript 6 under an alias. The package smoke test
   uses it to compile a consumer the way TypeScript 6 tooling does, beside the TypeScript 7 `tsc`.
   Dependabot does not update aliased packages, so bump it by hand within the TypeScript 6 line.
 - `npm run audit:full` accepts only the development-only advisories listed in
   `scripts/audit-policy.mjs`. A new advisory needs a dependency update, an override to a patched
-  release, or a reviewed entry in that file with its exit condition. `test/audit-policy.test.ts`
-  pins the accepted list, so a new entry updates it too.
+  release, or a reviewed entry in that file with its vulnerable range and exit condition.
+  `test/audit-policy.test.ts` pins the accepted list, so a new entry updates it too.
 
 ## Code style
 
