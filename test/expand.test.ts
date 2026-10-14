@@ -159,7 +159,10 @@ test('the full WMS and ArcGIS request strings are pinned byte for byte', () => {
 test('a zoom below the source minzoom throws', () => {
   const shallow = makeSource({ minzoom: 3 })
   assert.equal(expandUpstreamUrl(shallow, 3, 0, 0), 'https://h/3/0/0.png')
-  assert.throws(() => expandUpstreamUrl(shallow, 2, 0, 0), { name: 'RangeError', message: /out of s range/ })
+  assert.throws(() => expandUpstreamUrl(shallow, 2, 0, 0), {
+    name: 'RangeError',
+    message: /^z 2 is outside the s zoom range 3 to 18$/
+  })
 })
 
 test('an out-of-range tile coordinate throws', () => {
@@ -241,6 +244,10 @@ test('proxyTileTemplate builds the plugin-facing tile template', () => {
   assert.throws(() => proxyTileTemplate('/plugins/chart locker', 'depth-gebco'), {
     name: 'TypeError',
     message: /whitespace/
+  })
+  assert.throws(() => proxyTileTemplate('/plugins/chart\u200Blocker', 'depth-gebco'), {
+    name: 'TypeError',
+    message: /invisible characters/
   })
   assert.throws(() => proxyTileTemplate('/plugins/x?a=1', 'depth-gebco'), TypeError)
   assert.throws(() => proxyTileTemplate('/plugins/{z}', 'depth-gebco'), TypeError)

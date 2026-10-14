@@ -3,6 +3,7 @@
 import type { UpstreamTemplate } from './types.js'
 
 const ZXY_TOKEN = /\{(z|x|y)\}/g
+const SLASH = 0x2f
 
 /** Fill the {z}, {x}, and {y} tokens of a tile template. */
 export function substituteZXY(template: string, z: number, x: number, y: number): string {
@@ -16,7 +17,7 @@ export function substituteZXY(template: string, z: number, x: number, y: number)
  */
 export function withoutTrailingSlashes(value: string): string {
   let end = value.length
-  while (end > 0 && value.charCodeAt(end - 1) === 47) end--
+  while (end > 0 && value.charCodeAt(end - 1) === SLASH) end--
   return value.slice(0, end)
 }
 

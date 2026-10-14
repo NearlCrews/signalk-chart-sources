@@ -3,7 +3,21 @@ import test from 'node:test'
 import { chartSourceById } from '../src/registry.js'
 import type { LngLatBbox, UpstreamTemplate } from '../src/types.js'
 import { checkedSource, registerCatalogSource, validateChartSource } from '../src/validate.js'
-import { makeSource } from './fixtures.js'
+import { makeSource, withPrototypeEntries } from './fixtures.js'
+
+/**
+ * The message validateChartSource rejects a source with, once the given fields replace those of
+ * makeSource. Every rejection it reads is a TypeError.
+ */
+const messageOf = (fields: Record<string, unknown>): string => {
+  try {
+    validateChartSource({ ...makeSource(), ...fields })
+  } catch (error) {
+    assert.ok(error instanceof TypeError, `${String(error)} must be a TypeError`)
+    return error.message
+  }
+  assert.fail(`${JSON.stringify(Object.keys(fields))} must make the source invalid`)
+}
 
 /** A minimal valid WMS upstream. Hoisted so a change to the shape lands in one place. */
 const wmsUpstream = {
@@ -324,6 +338,42 @@ test('validateChartSource rejects invisible characters that change the host a UR
   )
 })
 
+test('URLs reject the invisible characters IDNA drops from a host, not only format characters', () => {
+  // Variation selectors, the combining grapheme joiner, and the Hangul fillers are not format
+  // characters, yet IDNA maps each to nothing, so the host would validate as written and resolve as
+  // plain example.com.
+  for (const invisible of ['\uFE0F', '\u{E0100}', '\u034F', '\u180B', '\u3164', '\uFFA0']) {
+    const label = `U+${invisible.codePointAt(0)?.toString(16).toUpperCase()}`
+    assert.throws(
+      () =>
+        validateChartSource(
+          makeSource({ upstream: { mode: 'xyz', urlTemplate: `https://example${invisible}.com/{z}/{x}/{y}.png` } })
+        ),
+      /invisible characters/,
+      `template ${label}`
+    )
+    assert.throws(
+      () =>
+        validateChartSource(
+          makeSource({
+            upstream: {
+              mode: 'style',
+              styleUrl: 'https://example.com/s.json',
+              allowedHosts: ['example.com', `example${invisible}.com`]
+            }
+          })
+        ),
+      /not a valid host/,
+      `allowedHosts ${label}`
+    )
+    assert.throws(
+      () => validateChartSource({ ...makeSource(), upstream: { ...wmsUpstream, layers: `a${invisible}` } }),
+      /must not contain whitespace, controls, invisibles/,
+      `WMS layers ${label}`
+    )
+  }
+})
+
 test('validateChartSource rejects leftover braces and CGI separator characters', () => {
   for (const urlTemplate of [
     'https://h/{z}/{x}/{y}/{}.png',
@@ -483,6 +533,23 @@ test('validateChartSource checks style host shape and authorization case-insensi
       ),
     /must not contain duplicates/
   )
+})
+
+test('an allowed host must parse as a bare host and nothing more', () => {
+  // A forbidden host character fails the parser outright, and a backslash parses as a path after the
+  // host, so neither names a host on its own.
+  for (const host of ['tiles<.example', 'tiles^.example', 'tiles.example\\path']) {
+    assert.throws(
+      () =>
+        validateChartSource(
+          makeSource({
+            upstream: { mode: 'style', styleUrl: 'https://tiles.example/s.json', allowedHosts: ['tiles.example', host] }
+          })
+        ),
+      { name: 'TypeError', message: /allowedHosts\[1\] is not a valid host/ },
+      host
+    )
+  }
 })
 
 test('a URL must name its host directly after https://, without backslashes', () => {
@@ -650,23 +717,43 @@ test('WMS and ArcGIS requests reject any brace but their bbox token, which MapLi
   }
 })
 
-test('rejected values are echoed with controls, line separators, format characters, and lone surrogates escaped', () => {
-  const messageOf = (id: string): string => {
-    try {
-      validateChartSource({ ...makeSource(), id })
-    } catch (error) {
-      return (error as Error).message
-    }
-    assert.fail(`${JSON.stringify(id)} must be rejected`)
-  }
-  assert.equal(messageOf('bad\r\nforged: line'), 'invalid source id: bad\\u000D\\u000Aforged: line')
+test('rejected values are echoed with controls, line separators, invisibles, and lone surrogates escaped', () => {
+  assert.equal(messageOf({ id: 'bad\r\nforged: line' }), 'invalid source id: "bad\\u000D\\u000Aforged: line"')
   // The Unicode line and paragraph separators break a line in many log viewers just as LF does.
-  assert.equal(messageOf('bad\u2028forged\u2029line'), 'invalid source id: bad\\u2028forged\\u2029line')
-  assert.equal(messageOf('rtl‮evil'), 'invalid source id: rtl\\u202Eevil')
-  assert.equal(messageOf('tag\u{E0001}'), 'invalid source id: tag\\u{E0001}')
+  assert.equal(messageOf({ id: 'bad\u2028forged\u2029line' }), 'invalid source id: "bad\\u2028forged\\u2029line"')
+  assert.equal(messageOf({ id: 'rtl‮evil' }), 'invalid source id: "rtl\\u202Eevil"')
+  assert.equal(messageOf({ id: 'tag\u{E0001}' }), 'invalid source id: "tag\\u{E0001}"')
+  // An invisible character that is not a format character, here a Hangul filler, is shown as well.
+  assert.equal(messageOf({ id: 'fill\u3164er' }), 'invalid source id: "fill\\u3164er"')
   // Truncation can split a surrogate pair, and the orphaned half is escaped rather than echoed.
-  const split = messageOf(`${'a'.repeat(63)}\u{1F6A2}`)
-  assert.equal(split, `invalid source id: ${'a'.repeat(63)}\\uD83D...`)
+  const split = messageOf({ id: `${'a'.repeat(63)}\u{1F6A2}` })
+  assert.equal(split, `invalid source id: "${'a'.repeat(63)}\\uD83D"...`)
+})
+
+test('a rejected value is quoted when it is a string and named by type when it is an object', () => {
+  // Quoting keeps an empty id visible and tells the string "123" apart from the number 123.
+  assert.equal(messageOf({ id: '' }), 'invalid source id: ""')
+  assert.equal(messageOf({ id: 123 }), 'invalid source id: 123')
+  assert.equal(messageOf({ id: undefined }), 'invalid source id: undefined')
+  // An array or object would otherwise echo its own toString, so ["s"] would read as the valid id s
+  // and ["xyz"] as a known mode.
+  assert.equal(messageOf({ id: ['s'] }), 'invalid source id: [object]')
+  assert.equal(messageOf({ upstream: { mode: ['xyz'] } }), 's has an unknown upstream mode: [object]')
+  // Nothing of the value's own runs, so a hostile toString or toStringTag cannot replace the error.
+  let ran = false
+  const hostile = {
+    toString() {
+      ran = true
+      throw new Error('toString ran')
+    },
+    get [Symbol.toStringTag]() {
+      ran = true
+      throw new Error('toStringTag ran')
+    }
+  }
+  assert.equal(messageOf({ id: hostile }), 'invalid source id: [object]')
+  assert.equal(messageOf({ id: () => 's' }), 'invalid source id: [function]')
+  assert.equal(ran, false)
 })
 
 test('attribution may carry plain https links and no other markup', () => {
@@ -702,6 +789,36 @@ test('attribution may carry plain https links and no other markup', () => {
       rejected
     )
   }
+})
+
+test('a list cannot choose the class of its snapshot copy through Symbol.species', () => {
+  // Array#slice builds its result through the list's own constructor, so a list naming a hostile
+  // species could hand validation one host list while keeping another. The copy is built by hand.
+  const hostileSpecies = new Proxy(class {}, {
+    construct: () =>
+      new Proxy([], {
+        get: (target, key, receiver) => (key === 'map' ? () => ['t.example'] : Reflect.get(target, key, receiver))
+      })
+  })
+  const allowedHosts = Object.assign(['t.example', '127.0.0.1'], { constructor: { [Symbol.species]: hostileSpecies } })
+  assert.throws(
+    () =>
+      validateChartSource(
+        makeSource({ upstream: { mode: 'style', styleUrl: 'https://t.example/s.json', allowedHosts } })
+      ),
+    /IP address literal/
+  )
+  const coverage = Object.assign([[5, -80, 5, 80]], { constructor: { [Symbol.species]: hostileSpecies } })
+  assert.throws(
+    () => validateChartSource(makeSource({ coverage: coverage as unknown as LngLatBbox[] })),
+    /non-zero area/
+  )
+})
+
+test('an entry inherited from a polluted Array.prototype does not fill a hole in a list', () => {
+  withPrototypeEntries(Array.prototype, { 0: [0, 0, 1, 1] }, () => {
+    assert.throws(() => validateChartSource(makeSource({ coverage: Array(1) })), /coverage must be a dense array/)
+  })
 })
 
 test('an oversized list is refused on its length before its entries are walked', () => {
