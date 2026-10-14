@@ -66,7 +66,9 @@ toolchain. We use:
 - `npm audit` for vulnerability scanning, through a reviewed policy for development dependencies
 - Automated dependency updates via Dependabot for security patches, with a seven-day cooldown for
   routine updates
-- Full commit SHA pins for GitHub Actions, checked by actionlint and zizmor
+- Full commit SHA pins for GitHub Actions, checked against a reviewed list by
+  `scripts/check-workflows.mjs`, and by zizmor, which also confirms each pinned commit belongs to its
+  action and matches the release named beside it
 - npm OIDC trusted publishing and a reviewer-protected deployment environment for releases
 
 Run a security audit:
@@ -78,8 +80,9 @@ npm run audit:runtime
 
 `audit:runtime` audits what ships and must stay clean. `audit:full` audits the development toolchain
 too, and accepts only the advisories listed in `scripts/audit-policy.mjs`, each limited to the exact
-package chain it reaches. It fails on any other finding, and on an accepted advisory that is no
-longer reported, so an exception cannot outlive its cause.
+package chain and vulnerable range it was reviewed against. It fails on any other finding, on a
+finding npm can fix without a breaking change, and on an accepted advisory that is no longer
+reported, so an exception cannot outlive its cause.
 
 ### Accepted development advisories
 
@@ -89,8 +92,9 @@ longer reported, so an exception cannot outlive its cause.
   which expand the glob patterns in `package.json` and `.markdownlint-cli2.jsonc`. Both files are
   part of the repository, so a hostile pattern would have to arrive as a repository change, which
   could run arbitrary code in CI anyway, and none of the chain ships in the published package. The
-  exception ends when `braces` publishes a fix or the toolchain no longer depends on it; the audit
-  then fails until the entry is removed.
+  advisory covers every `braces` release, `<=3.0.3`. A patched release narrows that range, and the
+  audit then fails until the entry is reviewed, as it does once the toolchain no longer depends on
+  `braces`.
 
 ### Development dependency overrides
 

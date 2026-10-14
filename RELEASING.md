@@ -8,13 +8,17 @@ Publishing requires two explicit approvals:
 Do not create a tag, publish a GitHub release, or approve npm deployment without final maintainer
 approval.
 
-## One-time trusted-publishing setup
+## Trusted publishing
 
-The repository must have an `npm` environment with a required reviewer. The workflow references that
-environment and requests `id-token: write` only in the publish job.
+The publish workflow authenticates to npm only through OIDC trusted publishing. The repository has an
+`npm` environment with a required reviewer, the workflow references that environment, and only the
+publish job requests `id-token: write`. Releases already publish this way, and the repository holds no
+`NPM_TOKEN` secret, so the publish job has no token to fall back to. Keep it that way.
 
-The trusted-publisher workflow must exist on the default branch before it can be registered with npm.
-From an npm-authenticated CLI using a current npm release with trusted-publishing support, run:
+The trusted-publisher relationship names the workflow file and the environment. Renaming either, or
+moving the repository, breaks publication until the relationship is registered again. The workflow
+must exist on the default branch before it can be registered. From an npm-authenticated CLI using a
+current npm release with trusted-publishing support, run:
 
 ```bash
 npm trust github signalk-chart-sources \
@@ -30,9 +34,6 @@ Confirm the relationship:
 ```bash
 npm trust list signalk-chart-sources
 ```
-
-After one successful OIDC publication, remove the repository's legacy `NPM_TOKEN` secret, revoke the
-corresponding npm automation token, and confirm the workflow still publishes without token fallback.
 
 ## Prepare a release
 
@@ -91,7 +92,7 @@ Confirm all of the following against the published version:
 - The tarball contains `dist`, declarations, `package.json`, `README.md`, `CHANGELOG.md`,
   `MIGRATING.md`, and `LICENSE`, with no source tests, maintenance scripts, or local files.
 - A clean ESM project can install and import the package root.
-- The published declarations resolve under `moduleResolution: NodeNext`.
+- The published declarations resolve under `moduleResolution` `NodeNext` and `Bundler`.
 - GitHub CI and the publish workflow are green on the tagged commit.
 
 Useful read-only checks:
