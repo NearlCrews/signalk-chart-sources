@@ -2,12 +2,12 @@ import { clipRegions } from './mercator.js'
 import type { ChartGroup, ChartSource, LngLatBbox } from './types.js'
 import { registerCatalogSource, WMS_VERSION } from './validate.js'
 
-// Every shared upstream, transcribed from the Binnacle chartplotter source modules so the webapp render
-// config and the companion proxy allowlist never drift. The webapp augments these with its UI-only
-// metadata (parent, region, category, opacity) by id. The NASA GIBS ocean fields the webapp still
-// requests directly are not blocked on a date token: GIBS accepts the literal time segment 'default'
-// and serves the latest day, so they could be plain time-dynamic XYZ sources here. That is a
-// candidate addition, not a commitment.
+// Every shared upstream, defined once here so the Binnacle chartplotter's render config and the Chart
+// Locker proxy allowlist never drift. The webapp augments these with its UI-only metadata (parent,
+// region, category, opacity) by id. The NASA GIBS ocean fields the webapp still requests directly are
+// not blocked on a date token: GIBS accepts the literal time segment 'default' and serves the latest
+// day, so they could be plain time-dynamic XYZ sources here. That is a candidate addition, not a
+// commitment.
 
 const NOAA_ENC_WMS =
   'https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer'
@@ -19,6 +19,8 @@ const MARINE_REGIONS_WMS = 'https://geo.vliz.be/geoserver/MarineRegions/wms'
 const NOWCOAST_WMS = 'https://nowcoast.noaa.gov/geoserver/ows'
 const NOAA_MPA_SERVER =
   'https://gis.charttools.noaa.gov/arcgis/rest/services/survey_priorities2_national/MPA_Inventory_Separates/MapServer'
+/** The Seascape tileset root, which serves both tile formats and the TileJSON describing each. */
+const SEASCAPE_TILES = 'https://tiles.openwaters.io/seascape'
 
 // How long a fetched tile of a time-dynamic source stays usable. Each is the shortest interval that
 // still lets an offline boat render something recent, taken from the product's own refresh cadence.
@@ -60,9 +62,10 @@ const EMODNET_DTM_COVERAGE: readonly LngLatBbox[] = [
 /** Display envelope for the EMODnet DTM: the union of the sampled coverage above. */
 const EMODNET_DTM_BOUNDS: LngLatBbox = [-72.5, 10.0, 45.0, 85.0]
 // The quality index and the contours are separate layers over the same grid. Each advertises a
-// slightly smaller reach (roughly -70.5 to 43) than the bathymetry layer advertises (-73.1 to 45);
-// both figures are advertised extents, distinct from the narrower sampled union above.
-const EMODNET_FACET_BOUNDS: LngLatBbox = [-70.5, 11.0, 43.0, 85.0]
+// slightly smaller reach (-70.5 to 43.003 at most, read 2026-10-14) than the bathymetry layer
+// advertises (-73.125 to 45); both figures are advertised extents, distinct from the narrower sampled
+// union above. The east edge rounds outward and the north edge stops where the DTM sampling did.
+const EMODNET_FACET_BOUNDS: LngLatBbox = [-70.5, 11.0, 43.01, 85.0]
 // The facets render the same data as the DTM, so their coverage is the DTM's, clipped to their own
 // narrower envelope. Derived here rather than transcribed, so a re-derived DTM list flows through.
 const EMODNET_FACET_COVERAGE: readonly LngLatBbox[] = clipRegions(
@@ -71,9 +74,11 @@ const EMODNET_FACET_COVERAGE: readonly LngLatBbox[] = clipRegions(
   DATA_LAT_LIMIT
 )
 // The two EMODnet Human Activities overlays are a different service with a different reach, so they
-// carry their own advertised envelopes rather than borrowing the bathymetry's.
-const EMODNET_MPA_BOUNDS: LngLatBbox = [-42.39, 34.1, 36.17, 74.92]
-const NATURA_2000_BOUNDS: LngLatBbox = [-32.37, 24.59, 34.1, 69.11]
+// carry their own advertised envelopes rather than borrowing the bathymetry's. Like every bounds box
+// transcribed from an advertised envelope, these round outward, so no edge strip of data is dropped;
+// check-upstreams.ts reports a layer whose envelope grows past them.
+const EMODNET_MPA_BOUNDS: LngLatBbox = [-42.39, 34.09, 36.18, 74.92]
+const NATURA_2000_BOUNDS: LngLatBbox = [-32.37, 24.58, 34.11, 69.11]
 // The BlueTopo geographic extent from the service GetCapabilities (bluetopo:bathymetry, read
 // 2026-10-05): US waters spanning longitude -138.0988 to -64.1977 (all western hemisphere, so all
 // negative) and latitude 16.7858 to 59.5505 north, rounded outward so no edge strip is dropped. The
@@ -89,6 +94,10 @@ const NOAA_ENC_BOUNDS: LngLatBbox = [-180, -78.333333, 180, 81.6]
 // envelope above. The catalog extremes match that envelope (Chukchi Plateau 81.6 north, Vahsel Bay
 // -78.33 south), so re-derive these boxes whenever the upstream monitor reports that envelope drifted.
 // Harbor-scale detail is sparse inside the larger boxes; only areas with no ENC cell at all are excluded.
+// Re-checked 2026-10-14 against that day's catalog, after NOAA replaced its band-1 overview cells with
+// the US1GLB grid: the outline of every one of the 7,114 active cells lies inside these boxes, and each
+// box still holds active cells.
+// cspell:ignore GLBAA GLBBA GLBCA GLBCD
 const NOAA_ENC_COVERAGE: readonly LngLatBbox[] = clipRegions(
   [
     // US East Coast, Gulf coast, Great Lakes, Puerto Rico, and the US Virgin Islands.
@@ -101,10 +110,11 @@ const NOAA_ENC_COVERAGE: readonly LngLatBbox[] = clipRegions(
     [-179.3, 5, -154, 30],
     [-178.8, 15.6, -153.6, 28.8],
     [-166.4, 18, -150, 30],
-    // San Diego to the Aleutians and Hawaii (US1WC07) and the eastern North Pacific (US1PO02).
+    // The band-1 North Pacific cells from Midway Atoll east to San Diego (US1GLBCA through US1GLBCD).
     [-180, 18.7, -116.3, 38.4],
     [-154, 15, -116.5, 18.8],
-    // South Pacific: Cook, Samoa, Phoenix, and Line Islands (US1EEZ2), plus American Samoa and Swains.
+    // The band-1 central Pacific cells from Winslow Reef north to Kingman Reef (US1GLBAA and US1GLBBA),
+    // plus American Samoa and Swains Island.
     [-180, -7.5, -154.3, 18.8],
     [-173.8, -17.6, -165.2, -10],
     // Guam, the Northern Mariana Islands, Palau, Micronesia, the Marshall Islands, and Wake Island.
@@ -124,6 +134,7 @@ const NOAA_ENC_COVERAGE: readonly LngLatBbox[] = clipRegions(
 // smallest set of boxes that leaves no occupied cell out. The service fullExtent reaches
 // [-180, -15.386, 180, 74.707], but it is an envelope spanning the Pacific and warming it whole would
 // enumerate most of the planet. Re-derive from the sub-layer geometry whenever that envelope drifts.
+// Re-checked 2026-10-14: every ring vertex of the same 1,623 features lies inside these boxes.
 const NOAA_MPA_COVERAGE: readonly LngLatBbox[] = [
   // Hawaii, Papahanaumokuakea out to Kure, and Johnston Atoll.
   [-180, 12, -156, 30],
@@ -149,7 +160,11 @@ const NOAA_MPA_COVERAGE: readonly LngLatBbox[] = [
   // American Samoa and Rose Atoll.
   [-172, -16, -166, -10]
 ]
-/** Display envelope for the NOAA MPA inventory: the union of the derived coverage above. */
+/**
+ * Display envelope for the NOAA MPA inventory: the union of the derived coverage above, taken without
+ * crossing the antimeridian. The tighter crossing box, [142, -16, -64, 76], would hide the layer
+ * everywhere, because MapLibre's TileBounds reads a west edge east of the east edge as empty.
+ */
 const NOAA_MPA_BOUNDS: LngLatBbox = [-180, -16, 180, 76]
 
 // Attribution strings shared by more than one source, named so a correction cannot land on one copy
@@ -173,10 +188,16 @@ const OPENFREEMAP_HOST = 'tiles.openfreemap.org'
 // The DTM 2024 release, which the WMS serves: it archives the 2022 grid as emodnet:mean_2022, and the
 // citation and year follow the release's DOI record (https://doi.org/10.12770/cf51df64-56f9-4a99-b1aa-36b8d7b743a1).
 const EMODNET_BATHY_ATTR = 'EMODnet Bathymetry Consortium (2024): EMODnet Digital Bathymetry (DTM 2024)'
-const EMODNET_HA_ATTR = 'EMODnet Human Activities'
+// Every EMODnet Human Activities layer is CC BY 4.0, and its metadata record names the data
+// originator to credit: Cogea for all of them but the wind farms, which CETMAR compiled (read
+// 2026-10-14 from the CSW record each layer's capabilities link to).
+const EMODNET_HA_ATTR = 'Cogea for EMODnet Human Activities, CC BY 4.0'
+const EMODNET_HA_WIND_FARMS_ATTR = 'CETMAR for EMODnet Human Activities, CC BY 4.0'
 const BLUETOPO_ATTR = 'NOAA Office of Coast Survey, BlueTopo / National Bathymetric Source'
 const NOAA_ENC_ATTR = 'NOAA Office of Coast Survey, Electronic Navigational Charts (ENC)'
-const VLIZ_ATTR = 'Flanders Marine Institute (VLIZ), marineregions.org, CC-BY'
+// Marine Regions products are CC BY 4.0 since Maritime Boundaries version 11, per the DOI records of
+// the layers below (https://doi.org/10.14284/632 for the boundaries, 10.14284/696 for the high seas).
+const VLIZ_ATTR = 'Flanders Marine Institute (VLIZ), marineregions.org, CC BY 4.0'
 // Two Marine Regions layers differ from the CC BY credit above, so each carries its own. The IHO sea
 // areas are licensed CC BY-NC-SA 4.0 (https://doi.org/10.14284/323), not CC BY, and the World
 // Heritage marine sites are UNESCO's data, which the service only hosts (https://doi.org/10.14284/592).
@@ -192,13 +213,12 @@ const NOWCOAST_ALERTS_ATTR = 'NOAA/NWS nowCOAST, watches, warnings, and advisori
 // title and abstract, not a GHRSST product.
 const NOWCOAST_SST_ATTR = 'NOAA/NWS/NCEP nowCOAST, GFS NSST global sea surface temperature analysis'
 // Verbatim, fetched from https://tiles.openwaters.io/seascape/vector.json's and raster.json's
-// identical attribution fields on 2026-08-02, trailing space included (mirrors Binnacle's own copy
-// in src/features/depth-charts/seascape-sources.ts; re-fetch and update both if Seascape's own
-// attribution text changes). Upstream has shortened this twice: first dropping the roughly
-// twenty-five underlying dataset credits behind the license link this anchor points at, then on or
-// before 2026-08-02 shortening the company name itself. Transcribed rather than kept, because the
-// catalog credits what the service says it serves; check-upstreams.ts compares this against the
-// live TileJSON on every run.
+// identical attribution fields on 2026-08-02, trailing space included, and unchanged on 2026-10-14.
+// Binnacle reads this credit from the catalog, so a re-fetched credit lands here alone. Upstream has
+// shortened this twice: first dropping the roughly twenty-five underlying dataset credits behind the
+// license link this anchor points at, then on or before 2026-08-02 shortening the company name
+// itself. Transcribed rather than kept, because the catalog credits what the service says it serves;
+// check-upstreams.ts compares this against the live TileJSON on every run.
 // cspell:disable -- verbatim upstream attribution; never edit it to satisfy a dictionary
 const SEASCAPE_ATTR = '<a href="https://openwaters.io/charts/seascape#license">© Open Waters</a> '
 // cspell:enable
@@ -212,19 +232,18 @@ const NOAA_ENC_GROUP: ChartGroup = { id: 'noaa-enc', title: 'NOAA ENC (US)' }
 const EMODNET_MPA_GROUP: ChartGroup = { id: 'emodnet-mpa', title: 'Protected areas (EU)' }
 const RADAR_GROUP: ChartGroup = { id: 'weather-radar', title: 'Weather radar (US)' }
 
+/**
+ * What a WMS source sets beyond its id, title, service, and layers. Field types derive from
+ * ChartSource so they cannot drift from it; styles defaults to the empty server-default form all but
+ * two sources use.
+ */
+type WmsExtra = Pick<ChartSource, 'bounds' | 'coverage' | 'maxAgeSeconds' | 'attribution' | 'group'> & {
+  maxzoom?: number
+  styles?: string
+}
+
 /** Build a WMS GetMap ChartSource (256 px, EPSG:3857, image/png, transparent), matching the webapp wmsTiles. */
-function wms(
-  id: string,
-  title: string,
-  base: string,
-  layers: string,
-  // Field types derive from ChartSource so they cannot drift from it; styles defaults to the empty
-  // server-default form all but two sources use.
-  extra: Pick<ChartSource, 'bounds' | 'coverage' | 'maxAgeSeconds' | 'attribution' | 'group'> & {
-    maxzoom?: number
-    styles?: string
-  }
-): ChartSource {
+function wms(id: string, title: string, base: string, layers: string, extra: WmsExtra): ChartSource {
   return {
     id,
     title,
@@ -268,48 +287,88 @@ function radar(id: string, title: string, region: string, bounds: LngLatBbox): C
   })
 }
 
+/**
+ * Build one view of the GEBCO grid. The three layers render the same grid, so the service, the
+ * ceiling, the credit, and the group belong to the grid rather than to any one view.
+ */
+function gebco(id: string, title: string, layer: string): ChartSource {
+  return wms(id, title, GEBCO_WMS, layer, { maxzoom: 12, attribution: GEBCO_ATTR, group: GEBCO_GROUP })
+}
+
+/**
+ * Build one view of the EMODnet DTM. The bathymetry and its two facets render the same grid, so the
+ * service, the ceiling, the credit, and the group belong to the grid; each view brings its own reach.
+ */
+function emodnetDtm(
+  id: string,
+  title: string,
+  layer: string,
+  view: Pick<WmsExtra, 'bounds' | 'coverage' | 'styles'>
+): ChartSource {
+  return wms(id, title, EMODNET_WMS, layer, {
+    ...view,
+    maxzoom: 12,
+    attribution: EMODNET_BATHY_ATTR,
+    group: EMODNET_GROUP
+  })
+}
+
+/**
+ * Build one EMODnet Human Activities overlay. The seven share a service and, but for the wind farms,
+ * a credit; each brings its own advertised envelope, and some a ceiling or a group.
+ */
+function emodnetHa(
+  id: string,
+  title: string,
+  layer: string,
+  view: Omit<WmsExtra, 'attribution'> & Partial<Pick<WmsExtra, 'attribution'>>
+): ChartSource {
+  return wms(id, title, EMODNET_HA_WMS, layer, { attribution: EMODNET_HA_ATTR, ...view })
+}
+
+/**
+ * Build one OpenFreeMap basemap. Every style draws the same OpenMapTiles tileset from the same host
+ * under the same terms, so only the style differs.
+ */
+function openFreeMap(id: string, title: string, style: string): ChartSource {
+  return {
+    id,
+    title,
+    tileSize: 256,
+    minzoom: 0,
+    maxzoom: 20,
+    vectorMaxzoom: 14,
+    fallbackTileBytes: 750_000,
+    attribution: OPENFREEMAP_ATTR,
+    upstream: {
+      mode: 'style',
+      styleUrl: `https://${OPENFREEMAP_HOST}/styles/${style}`,
+      allowedHosts: [OPENFREEMAP_HOST]
+    }
+  }
+}
+
 const SOURCES: ChartSource[] = [
-  wms('depth-gebco', 'GEBCO bathymetry', GEBCO_WMS, 'GEBCO_LATEST', {
-    maxzoom: 12,
-    attribution: GEBCO_ATTR,
-    group: GEBCO_GROUP
-  }),
+  gebco('depth-gebco', 'GEBCO bathymetry', 'GEBCO_LATEST'),
   // The same grid rendered flat rather than shaded, which stays legible with overlays stacked on it.
-  wms('depth-gebco-color', 'Color elevation', GEBCO_WMS, 'GEBCO_LATEST_2', {
-    maxzoom: 12,
-    attribution: GEBCO_ATTR,
-    group: GEBCO_GROUP
-  }),
+  gebco('depth-gebco-color', 'Color elevation', 'GEBCO_LATEST_2'),
   // Measured soundings only, with the interpolated cells left out: the quality facet of a global
   // grid that is mostly interpolation.
-  wms('depth-gebco-measured', 'Measured data only', GEBCO_WMS, 'GEBCO_LATEST_3', {
-    maxzoom: 12,
-    attribution: GEBCO_ATTR,
-    group: GEBCO_GROUP
-  }),
-  wms('depth-emodnet', 'EMODnet bathymetry', EMODNET_WMS, 'emodnet:mean_multicolour', {
-    maxzoom: 12,
+  gebco('depth-gebco-measured', 'Measured data only', 'GEBCO_LATEST_3'),
+  emodnetDtm('depth-emodnet', 'EMODnet bathymetry', 'emodnet:mean_multicolour', {
     bounds: EMODNET_DTM_BOUNDS,
-    coverage: EMODNET_DTM_COVERAGE,
-    attribution: EMODNET_BATHY_ATTR,
-    group: EMODNET_GROUP
+    coverage: EMODNET_DTM_COVERAGE
   }),
-  wms('depth-emodnet-quality', 'Quality index', EMODNET_WMS, 'emodnet:quality_index', {
+  emodnetDtm('depth-emodnet-quality', 'Quality index', 'emodnet:quality_index', {
     styles: 'quality_index_combined',
-    maxzoom: 12,
     bounds: EMODNET_FACET_BOUNDS,
-    coverage: EMODNET_FACET_COVERAGE,
-    attribution: EMODNET_BATHY_ATTR,
-    group: EMODNET_GROUP
+    coverage: EMODNET_FACET_COVERAGE
   }),
   // Generalized depth contours over the same DTM, the closest thing to chart-style depth lines that
   // is free and keyless outside the ENC services.
-  wms('depth-emodnet-contours', 'Depth contours', EMODNET_WMS, 'emodnet:contours', {
-    maxzoom: 12,
+  emodnetDtm('depth-emodnet-contours', 'Depth contours', 'emodnet:contours', {
     bounds: EMODNET_FACET_BOUNDS,
-    coverage: EMODNET_FACET_COVERAGE,
-    attribution: EMODNET_BATHY_ATTR,
-    group: EMODNET_GROUP
+    coverage: EMODNET_FACET_COVERAGE
   }),
   {
     // tileSize 512 matches the upstream: the nowcoast GWC EPSG:3857 tile matrix set serves
@@ -360,8 +419,8 @@ const SOURCES: ChartSource[] = [
     attribution: SEASCAPE_ATTR,
     upstream: {
       mode: 'xyz',
-      urlTemplate: 'https://tiles.openwaters.io/seascape/{z}/{x}/{y}.webp',
-      tileJsonUrl: 'https://tiles.openwaters.io/seascape/raster.json'
+      urlTemplate: `${SEASCAPE_TILES}/{z}/{x}/{y}.webp`,
+      tileJsonUrl: `${SEASCAPE_TILES}/raster.json`
     }
   },
   {
@@ -374,8 +433,8 @@ const SOURCES: ChartSource[] = [
     attribution: SEASCAPE_ATTR,
     upstream: {
       mode: 'xyz',
-      urlTemplate: 'https://tiles.openwaters.io/seascape/{z}/{x}/{y}.pbf',
-      tileJsonUrl: 'https://tiles.openwaters.io/seascape/vector.json'
+      urlTemplate: `${SEASCAPE_TILES}/{z}/{x}/{y}.pbf`,
+      tileJsonUrl: `${SEASCAPE_TILES}/vector.json`
     }
   },
   {
@@ -385,8 +444,9 @@ const SOURCES: ChartSource[] = [
     minzoom: 0,
     maxzoom: 18,
     fallbackTileBytes: 256_000,
-    // The seamarks are OpenStreetMap data rendered by OpenSeaMap, so ODbL needs both credits.
-    attribution: '© OpenSeaMap contributors, © OpenStreetMap contributors, ODbL',
+    // OpenSeaMap's license page puts its rendered seamarks under CC BY-SA 2.0, and the seamarks are
+    // OpenStreetMap data, which ODbL requires crediting as well.
+    attribution: '© OpenSeaMap contributors, CC BY-SA 2.0, © OpenStreetMap contributors, ODbL',
     upstream: { mode: 'xyz', urlTemplate: 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png' }
   },
   // The Marine Regions layers are worldwide and served from generalized polygons, so they keep the
@@ -408,45 +468,13 @@ const SOURCES: ChartSource[] = [
   wms('bound-iho', 'Sea areas (IHO)', MARINE_REGIONS_WMS, 'iho', {
     attribution: IHO_ATTR
   }),
-  wms('mpa-emodnet', 'Marine protected areas', EMODNET_HA_WMS, 'marineprotectedareas', {
+  emodnetHa('mpa-emodnet', 'Marine protected areas', 'marineprotectedareas', {
     bounds: EMODNET_MPA_BOUNDS,
-    attribution: EMODNET_HA_ATTR,
     group: EMODNET_MPA_GROUP
   }),
-  wms('mpa-natura2000', 'Natura 2000', EMODNET_HA_WMS, 'natura2000areas', {
+  emodnetHa('mpa-natura2000', 'Natura 2000', 'natura2000areas', {
     bounds: NATURA_2000_BOUNDS,
-    attribution: EMODNET_HA_ATTR,
     group: EMODNET_MPA_GROUP
-  }),
-  // The only worldwide protected-area layer in the catalog; the other three are EU or US only.
-  wms('mpa-unesco', 'UNESCO marine sites', MARINE_REGIONS_WMS, 'worldheritagemarineprogramme', {
-    attribution: UNESCO_ATTR
-  }),
-  // Seabed infrastructure: what an anchor must not land on. Advertised envelopes, which for the two
-  // cable layers really are near worldwide.
-  wms('infra-power-cables', 'Power cables', EMODNET_HA_WMS, 'powercables', {
-    bounds: [-151.77, -22.33, 166.47, 71.04],
-    attribution: EMODNET_HA_ATTR
-  }),
-  wms('infra-telecom-cables', 'Telecom cables', EMODNET_HA_WMS, 'telecablesactual', {
-    bounds: [-178.21, -33.82, 178.98, 61.51],
-    attribution: EMODNET_HA_ATTR
-  }),
-  wms('infra-pipelines', 'Pipelines', EMODNET_HA_WMS, 'pipelines', {
-    bounds: [-11.06, 36.0, 28.14, 71.57],
-    attribution: EMODNET_HA_ATTR
-  }),
-  wms('infra-wind-farms', 'Wind farms', EMODNET_HA_WMS, 'windfarmspoly', {
-    bounds: [-16.59, 27.73, 24.74, 65.47],
-    attribution: EMODNET_HA_ATTR
-  }),
-  // Annual average AIS density on a 1 km grid, so it stops well short of the chart-display ceiling.
-  // The annual layer rather than vesseldensity_all: that one is monthly, and with no TIME the server
-  // serves a single month (December 2024 as of 2026-10-05), which misstates traffic for most of the year.
-  wms('traffic-vessel-density', 'Vessel density (annual average)', EMODNET_HA_WMS, 'vesseldensity_allavg', {
-    maxzoom: 10,
-    bounds: [-87.71, 14.96, 97.63, 85.0],
-    attribution: EMODNET_HA_ATTR
   }),
   {
     id: 'mpa-noaa',
@@ -460,13 +488,35 @@ const SOURCES: ChartSource[] = [
     attribution: 'NOAA National Marine Protected Areas Center',
     upstream: { mode: 'arcgis', base: NOAA_MPA_SERVER }
   },
+  // The only worldwide protected-area layer in the catalog; the other three are EU or US only.
+  wms('mpa-unesco', 'UNESCO marine sites', MARINE_REGIONS_WMS, 'worldheritagemarineprogramme', {
+    attribution: UNESCO_ATTR
+  }),
+  // Seabed infrastructure: what an anchor must not land on. Advertised envelopes rounded outward,
+  // which for the two cable layers really are near worldwide.
+  emodnetHa('infra-power-cables', 'Power cables', 'powercables', { bounds: [-151.78, -22.34, 166.48, 71.05] }),
+  emodnetHa('infra-telecom-cables', 'Telecom cables', 'telecablesactual', { bounds: [-178.22, -33.83, 178.98, 61.52] }),
+  emodnetHa('infra-pipelines', 'Pipelines', 'pipelines', { bounds: [-11.06, 35.99, 28.15, 71.57] }),
+  emodnetHa('infra-wind-farms', 'Wind farms', 'windfarmspoly', {
+    bounds: [-16.59, 27.73, 24.74, 65.48],
+    attribution: EMODNET_HA_WIND_FARMS_ATTR
+  }),
+  // Annual average AIS density on a 1 km grid, so it stops well short of the chart-display ceiling.
+  // The annual layer rather than vesseldensity_all: that one is monthly, and with no TIME the server
+  // serves a single month (December 2024 as of 2026-10-14), which misstates traffic for most of the year.
+  // The advertised envelope reaches 86.8 north, past the Web Mercator limit, where tiling stops anyway.
+  emodnetHa('traffic-vessel-density', 'Vessel density (annual average)', 'vesseldensity_allavg', {
+    maxzoom: 10,
+    bounds: [-87.71, 14.96, 97.64, 86.81]
+  }),
   // Every source below is time-dynamic, so each carries maxAgeSeconds and the low ceiling that
   // implies. The four radar mosaics are one product in four regions and differ only in region, so
-  // they are built rather than spelled out: raising the ceiling or the cadence is then one edit.
-  radar('weather-radar-conus', 'US weather radar', 'conus', [-130.0, 20.003, -59.997, 55.0]),
+  // they are built rather than spelled out: raising the ceiling or the cadence is then one edit. Each
+  // region's bounds are its mosaic's advertised envelope, rounded outward.
+  radar('weather-radar-conus', 'Contiguous US weather radar', 'conus', [-130.0, 20.002, -59.996, 55.0]),
   radar('weather-radar-alaska', 'Alaska weather radar', 'alaska', [-176.0, 49.996, -125.994, 72.0]),
-  radar('weather-radar-hawaii', 'Hawaii weather radar', 'hawaii', [-164.0, 14.998, -151.001, 26.0]),
-  radar('weather-radar-caribbean', 'Caribbean weather radar', 'caribbean', [-90.0, 9.996, -60.004, 25.0]),
+  radar('weather-radar-hawaii', 'Hawaii weather radar', 'hawaii', [-164.001, 14.997, -151.0, 26.0]),
+  radar('weather-radar-caribbean', 'Caribbean weather radar', 'caribbean', [-90.0, 9.995, -60.004, 25.0]),
   // No time dimension on either of the next two: the service serves the current state by design, so
   // an omitted TIME is already the answer rather than a default that could drift.
   wms('weather-tropical', 'Active tropical cyclones', NOWCOAST_WMS, 'tropical_cyclones:active_tropical_cyclones', {
@@ -491,39 +541,11 @@ const SOURCES: ChartSource[] = [
       attribution: NOWCOAST_SST_ATTR
     }
   ),
-  {
-    id: 'basemap',
-    title: 'OpenFreeMap Liberty',
-    tileSize: 256,
-    minzoom: 0,
-    maxzoom: 20,
-    vectorMaxzoom: 14,
-    fallbackTileBytes: 750_000,
-    attribution: OPENFREEMAP_ATTR,
-    upstream: {
-      mode: 'style',
-      styleUrl: `https://${OPENFREEMAP_HOST}/styles/liberty`,
-      allowedHosts: [OPENFREEMAP_HOST]
-    }
-  },
-  {
-    // The dark-matter fork of the same OpenMapTiles schema, on the same host and the same terms, so
-    // it needs no new allowed host. A chartplotter is used at night, and a genuinely dark basemap
-    // beats desaturating a light one at the renderer.
-    id: 'basemap-dark',
-    title: 'OpenFreeMap Dark',
-    tileSize: 256,
-    minzoom: 0,
-    maxzoom: 20,
-    vectorMaxzoom: 14,
-    fallbackTileBytes: 750_000,
-    attribution: OPENFREEMAP_ATTR,
-    upstream: {
-      mode: 'style',
-      styleUrl: `https://${OPENFREEMAP_HOST}/styles/dark`,
-      allowedHosts: [OPENFREEMAP_HOST]
-    }
-  }
+  openFreeMap('basemap', 'OpenFreeMap Liberty', 'liberty'),
+  // The dark-matter fork of the same OpenMapTiles schema, on the same host and the same terms, so it
+  // needs no new allowed host. A chartplotter is used at night, and a genuinely dark basemap beats
+  // desaturating a light one at the renderer.
+  openFreeMap('basemap-dark', 'OpenFreeMap Dark', 'dark')
 ]
 
 function deepFreeze<T>(value: T): T {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EXPECTED_EXPORTS } from '../scripts/expected-exports.mjs'
+import { overhang } from '../scripts/upstream-documents.js'
 import { expandUpstreamUrl } from '../src/expand.js'
 import { MAX_MERCATOR_LAT, tileCountInBbox } from '../src/mercator.js'
 import { assertGroupCoherence, CHART_SOURCES, chartSourceById } from '../src/registry.js'
@@ -124,7 +125,25 @@ test('attribution names the release and the license each upstream states (drift 
     src('bound-iho').attribution,
     'Flanders Marine Institute (VLIZ) (2018): IHO Sea Areas, version 3, marineregions.org, CC BY-NC-SA 4.0'
   )
-  assert.equal(src('bound-eez').attribution, 'Flanders Marine Institute (VLIZ), marineregions.org, CC-BY')
+  for (const id of ['bound-eez', 'bound-12nm', 'bound-24nm', 'bound-high-seas']) {
+    assert.equal(
+      src(id).attribution,
+      'Flanders Marine Institute (VLIZ), marineregions.org, CC BY 4.0',
+      `${id} attribution`
+    )
+  }
+  // Every EMODnet Human Activities layer is CC BY 4.0 and credits its data originator.
+  for (const id of [
+    'mpa-emodnet',
+    'mpa-natura2000',
+    'infra-power-cables',
+    'infra-telecom-cables',
+    'infra-pipelines',
+    'traffic-vessel-density'
+  ]) {
+    assert.equal(src(id).attribution, 'Cogea for EMODnet Human Activities, CC BY 4.0', `${id} attribution`)
+  }
+  assert.equal(src('infra-wind-farms').attribution, 'CETMAR for EMODnet Human Activities, CC BY 4.0')
   assert.equal(
     src('mpa-unesco').attribution,
     'UNESCO (2023): Boundaries of UNESCO World Heritage Marine Sites (v02), marineregions.org, CC BY 4.0'
@@ -133,7 +152,10 @@ test('attribution names the release and the license each upstream states (drift 
     src('ocean-sst-global').attribution,
     'NOAA/NWS/NCEP nowCOAST, GFS NSST global sea surface temperature analysis'
   )
-  assert.equal(src('seamark').attribution, '© OpenSeaMap contributors, © OpenStreetMap contributors, ODbL')
+  assert.equal(
+    src('seamark').attribution,
+    '© OpenSeaMap contributors, CC BY-SA 2.0, © OpenStreetMap contributors, ODbL'
+  )
   // Transcribed from the OpenFreeMap planet TileJSON, entity and link targets included.
   // cspell:disable -- verbatim upstream attribution
   const openFreeMap =
@@ -159,7 +181,7 @@ test('chart bounds preserve service coverage envelopes', () => {
   assert.equal(inBox(src('depth-emodnet').bounds, 0, 50), true)
   assert.equal(inBox(src('depth-emodnet').bounds, -62, 16), true)
   assert.equal(inBox(src('depth-emodnet').bounds, -140, 40), false)
-  // The EU protected-area layers now carry bounds so they self-hide outside Europe.
+  // The EU protected-area layers carry bounds so they self-hide outside Europe.
   assert.ok(src('mpa-emodnet').bounds)
   assert.ok(src('mpa-natura2000').bounds)
   assert.equal(inBox(src('mpa-emodnet').bounds, -71, 42.3), false)
@@ -228,6 +250,9 @@ test('BlueTopo bounds pin the US extent from the service capabilities (drift gua
   // South is a positive latitude and east is a negative longitude; a regression to the earlier
   // South Atlantic and European box fails here.
   assert.deepEqual(bluetopo.bounds, [-138.1, 16.785, -64.197, 59.551])
+  // The upstream monitor checks these bounds through the WMS facet, because the WMTS layer advertises
+  // a broken envelope, so the two must stay one box.
+  assert.deepEqual(src('depth-bluetopo-uncertainty').bounds, bluetopo.bounds)
 })
 
 test('NOAA ENC coverage pins the chart regions from the ENC product catalog (drift guard)', () => {
@@ -270,16 +295,16 @@ test('EMODnet coverage pins the sampled DTM regions (drift guard)', () => {
   // be drawn, and nothing their bounds would hide. Pinned box by box so the derivation is visible.
   const facetCoverage = [
     [-37.5, 27.5, 40.0, 85.0],
-    [40.0, 40.0, 43.0, 85.0],
+    [40.0, 40.0, 43.01, 85.0],
     [-37.5, 15.0, -12.5, 27.5],
     [-70.5, 11.0, -57.5, 20.0],
     [32.5, 22.5, 37.5, 27.5],
     [35.0, 15.0, 42.5, 25.0],
-    [42.5, 15.0, 43.0, 17.5]
+    [42.5, 15.0, 43.01, 17.5]
   ]
   for (const id of ['depth-emodnet-quality', 'depth-emodnet-contours']) {
     const facet = src(id)
-    assert.deepEqual(facet.bounds, [-70.5, 11.0, 43.0, 85.0], `${id} bounds`)
+    assert.deepEqual(facet.bounds, [-70.5, 11.0, 43.01, 85.0], `${id} bounds`)
     assert.deepEqual(facet.coverage, facetCoverage, `${id} coverage`)
   }
   // Disjoint by construction, so each box is exactly the region its comment names and none is
@@ -304,7 +329,7 @@ test('EMODnet coverage pins the sampled DTM regions (drift guard)', () => {
   assert.equal(covered(10, 20), false, 'the Sahara must not be covered')
 })
 
-test('clipped catalog coverage warms exactly the tiles it did before the clip moved to load time', () => {
+test('clipped catalog coverage pins the tiles it warms', () => {
   // The EMODnet facets and the NOAA ENC sources carry coverage clipped to their envelopes as the
   // catalog loads. The counts over the whole world at the chart-display zooms pin the clipped result.
   const world: LngLatBbox = [-180, -MAX_MERCATOR_LAT, 180, MAX_MERCATOR_LAT]
@@ -338,13 +363,14 @@ test('NOAA MPA coverage pins the inventory regions (drift guard)', () => {
     [-172, -16, -166, -10]
   ])
   const covered = coveredBy(mpa)
-  // Every one of these sat outside the old [-180, 15, -60, 75] box, which is the bug being fixed.
+  // The Pacific territories, which a single box around the US mainland, such as [-180, 15, -60, 75],
+  // would miss.
   assert.equal(covered(144.75, 13.45), true, 'Guam must be covered')
   assert.equal(covered(145.75, 15.2), true, 'the Northern Marianas must be covered')
   assert.equal(covered(-170.7, -14.3), true, 'American Samoa must be covered')
   assert.equal(covered(166.6, 19.3), true, 'Wake Island must be covered')
   assert.equal(covered(-162.1, 5.9), true, 'Palmyra Atoll must be covered')
-  // And these were already inside it and must stay covered.
+  // And the mainland and Alaska, which such a box does hold.
   assert.equal(covered(-121.9, 36.6), true, 'Monterey Bay must be covered')
   assert.equal(covered(-81.8, 24.5), true, 'the Florida Keys must be covered')
   assert.equal(covered(-176.6, 51.9), true, 'the Aleutians must be covered')
@@ -390,4 +416,69 @@ test('every catalog source carries a positive safe-integer fallbackTileBytes', (
       `${s.id} must carry a positive safe-integer fallbackTileBytes`
     )
   }
+})
+
+test('bounds transcribed from an advertised envelope hold all of it (drift guard)', () => {
+  // Each layer's EX_GeographicBoundingBox as its service advertised it on 2026-10-14. Rounding an
+  // edge to the nearest digit can cut a strip of real data off the edge, so every catalog box must
+  // reach at least this far on every side. check-upstreams.ts holds the live service to the same rule.
+  const advertised: Readonly<Record<string, LngLatBbox>> = {
+    'mpa-emodnet': [-42.38993453979492, 34.0986328125, 36.17428970336914, 74.91666412353516],
+    'mpa-natura2000': [-32.36805725097656, 24.58873176574707, 34.10148620605469, 69.10978698730469],
+    'infra-power-cables': [-151.771606445312, -22.3335704803467, 166.472946166992, 71.0426406860352],
+    'infra-telecom-cables': [-178.212066650391, -33.8243865966797, 178.97834777832, 61.5149345397949],
+    'infra-pipelines': [-11.0591726303101, 35.9955024719238, 28.1422805786133, 71.5687103271484],
+    'infra-wind-farms': [-16.589679718017578, 27.73302459716797, 24.7377872467041, 65.47056579589844],
+    'traffic-vessel-density': [-87.7064839294012, 14.961111053032125, 97.63302660959336, 86.80081200297836],
+    'weather-radar-conus': [-129.99999999985712, 20.002682634774324, -59.996793505634635, 54.99999999985709],
+    'weather-radar-alaska': [-175.9999999999, 49.996239780201094, -125.99435744000417, 72.0],
+    'weather-radar-hawaii': [-164.00000684818352, 14.997893958991074, -151.00052400333598, 25.99999726557036],
+    'weather-radar-caribbean': [-89.99999999983326, 9.995911550389966, -60.004112585492315, 24.999999999999996],
+    'depth-bluetopo-uncertainty': [-138.09879914514408, 16.78577581054834, -64.19767058826523, 59.55048862948487]
+  }
+  for (const [id, envelope] of Object.entries(advertised)) {
+    const bounds = src(id).bounds
+    assert.ok(bounds, `${id} must carry bounds`)
+    assert.ok(
+      overhang(envelope, bounds) <= 0,
+      `${id} bounds ${JSON.stringify(bounds)} cut into the advertised ${JSON.stringify(envelope)}`
+    )
+    // Rounded outward, not padded: no edge reaches a hundredth of a degree past the envelope.
+    assert.ok(
+      overhang(bounds, envelope) < 0.01,
+      `${id} bounds ${JSON.stringify(bounds)} reach well past the advertised envelope`
+    )
+  }
+})
+
+test('the radar mosaics are one product over four regions', () => {
+  const regions = {
+    'weather-radar-conus': ['Contiguous US weather radar', 'conus'],
+    'weather-radar-alaska': ['Alaska weather radar', 'alaska'],
+    'weather-radar-hawaii': ['Hawaii weather radar', 'hawaii'],
+    'weather-radar-caribbean': ['Caribbean weather radar', 'caribbean']
+  } as const
+  for (const [id, [title, region]] of Object.entries(regions)) {
+    const radar = src(id)
+    assert.ok(radar.upstream.mode === 'wms', `${id} mode`)
+    assert.equal(radar.title, title)
+    assert.equal(radar.upstream.layers, `weather_radar:${region}_base_reflectivity_mosaic`)
+    assert.equal(radar.upstream.base, 'https://nowcoast.noaa.gov/geoserver/ows')
+    assert.deepEqual(
+      [radar.maxzoom, radar.maxAgeSeconds, radar.attribution, radar.group],
+      [
+        10,
+        300,
+        'NOAA/NWS nowCOAST, NEXRAD base reflectivity mosaic',
+        { id: 'weather-radar', title: 'Weather radar (US)' }
+      ],
+      `${id} product fields`
+    )
+  }
+})
+
+test('the protected-area sources sit together in the catalog', () => {
+  const ids = CHART_SOURCES.map((s) => s.id)
+  const start = ids.indexOf('mpa-emodnet')
+  assert.deepEqual(ids.slice(start, start + 4), ['mpa-emodnet', 'mpa-natura2000', 'mpa-noaa', 'mpa-unesco'])
 })
