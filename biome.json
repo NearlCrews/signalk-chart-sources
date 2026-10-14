@@ -40,6 +40,22 @@
             "noNodejsModules": "error",
             "noProcessGlobal": "error"
           },
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "Buffer": "src runs in browsers too; use Uint8Array and TextEncoder.",
+                  "global": "src runs in browsers too; use globalThis.",
+                  "__dirname": "src performs no file I/O.",
+                  "__filename": "src performs no file I/O.",
+                  "require": "src is ESM and dependency-free.",
+                  "setImmediate": "src runs in browsers too.",
+                  "clearImmediate": "src runs in browsers too."
+                }
+              }
+            }
+          },
           "suspicious": {
             "noConsole": "error"
           }

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /**
  * @param {unknown} value
@@ -16,4 +18,15 @@ export function isRecord(value) {
 export function object(value, label) {
   assert.ok(isRecord(value), `${label} must be an object`)
   return value
+}
+
+/**
+ * The package.json in a directory, which must hold a JSON object.
+ *
+ * @param {string} directory
+ * @returns {Record<string, unknown>}
+ */
+export function readManifest(directory) {
+  const path = join(directory, 'package.json')
+  return object(JSON.parse(readFileSync(path, 'utf8')), path)
 }

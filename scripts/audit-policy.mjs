@@ -1,30 +1,40 @@
 import { isRecord, object } from './records.mjs'
 
 /**
- * @typedef {{ readonly url: string, readonly severity: string, readonly packages: readonly string[] }} AcceptedAdvisory
+ * @typedef {{
+ *   readonly url: string,
+ *   readonly severity: string,
+ *   readonly range: string,
+ *   readonly packages: readonly string[]
+ * }} AcceptedAdvisory
  * @typedef {{
  *   readonly severity: string,
  *   readonly via: readonly unknown[],
  *   readonly effects: readonly unknown[],
- *   readonly nodes: readonly unknown[]
+ *   readonly nodes: readonly unknown[],
+ *   readonly fixAvailable: unknown
  * }} AuditEntry
  */
 
 /**
- * Development-only advisories this repository has reviewed and accepted, each with the exact package
- * chain it reaches. The full audit fails on anything else, on a chain that grows or shrinks, and on an
- * accepted advisory that is no longer reported, so an exception cannot outlive its cause.
+ * Development-only advisories this repository has reviewed and accepted, each with the vulnerable range
+ * it was reviewed against and the exact package chain it reaches. The full audit fails on anything
+ * else, on a chain that grows or shrinks, on a range that changes, as it does when a patched release
+ * is published, on a finding npm can fix without a breaking change, and on an accepted advisory that
+ * is no longer reported, so an exception cannot outlive its cause.
  *
  * @type {readonly AcceptedAdvisory[]}
  */
 export const ACCEPTED_ADVISORIES = Object.freeze([
   Object.freeze({
-    // braces has no patched release. It reaches the tree only through markdownlint-cli2, which
-    // expands the glob patterns in package.json and .markdownlint-cli2.jsonc, both repository
-    // controlled, and nothing in the chain ships in the published package. Remove this entry once
-    // braces publishes a fix or markdownlint-cli2 stops depending on micromatch.
+    // braces has no patched release: the advisory covers every version. It reaches the tree only
+    // through markdownlint-cli2, which expands the glob patterns in package.json and
+    // .markdownlint-cli2.jsonc, both repository controlled, and nothing in the chain ships in the
+    // published package. Remove this entry once braces publishes a fix or markdownlint-cli2 stops
+    // depending on micromatch.
     url: 'https://github.com/advisories/GHSA-vfj7-8cjw-p6xm',
     severity: 'high',
+    range: '<=3.0.3',
     packages: Object.freeze(['braces', 'fast-glob', 'globby', 'markdownlint-cli2', 'micromatch'])
   })
 ])
@@ -69,12 +79,20 @@ function auditEntry(name, entry) {
     !isRecord(entry) ||
     typeof entry['severity'] !== 'string' ||
     !Array.isArray(entry['via']) ||
+    entry['via'].length === 0 ||
     !Array.isArray(entry['effects']) ||
-    !Array.isArray(entry['nodes'])
+    !Array.isArray(entry['nodes']) ||
+    (typeof entry['fixAvailable'] !== 'boolean' && !isRecord(entry['fixAvailable']))
   ) {
     throw new Error(`Malformed or changed audit entry for ${name}`)
   }
-  return { severity: entry['severity'], via: entry['via'], effects: entry['effects'], nodes: entry['nodes'] }
+  return {
+    severity: entry['severity'],
+    via: entry['via'],
+    effects: entry['effects'],
+    nodes: entry['nodes'],
+    fixAvailable: entry['fixAvailable']
+  }
 }
 
 /**
@@ -104,6 +122,12 @@ export function assertAcceptedAudit(report, manifest, accepted = ACCEPTED_ADVISO
     if (!chains.some((advisory) => advisory.severity === entry.severity)) {
       throw new Error(`Unexpected severity for ${name}: ${entry.severity}`)
     }
+    // npm reports true, or the direct dependency update that clears the finding, once one exists. An
+    // update within the dependency's major makes the exception unnecessary, so it fails here.
+    const fix = entry.fixAvailable
+    if (fix === true || (isRecord(fix) && fix['isSemVerMajor'] !== true)) {
+      throw new Error(`npm can now fix ${name} without a breaking change; update the dependency instead`)
+    }
     for (const cause of entry.via) {
       if (typeof cause === 'string') {
         if (!sharesChain(cause)) throw new Error(`Unexpected audit cause for ${name}: ${cause}`)
@@ -116,6 +140,12 @@ export function assertAcceptedAudit(report, manifest, accepted = ACCEPTED_ADVISO
       if (!advisory) throw new Error(`Unexpected advisory for ${name}: ${cause['url']}`)
       if (cause['severity'] !== advisory.severity || !advisory.packages.includes(name)) {
         throw new Error(`Advisory ${advisory.url} changed severity or reached ${name}`)
+      }
+      if (cause['range'] !== advisory.range) {
+        throw new Error(
+          `Advisory ${advisory.url} now covers ${String(cause['range'])}, not the reviewed ${advisory.range}; ` +
+            'check whether a patched release exists'
+        )
       }
       seenUrls.add(advisory.url)
     }
