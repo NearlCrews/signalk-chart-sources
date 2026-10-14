@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { assertAcceptedAudit } from './audit-policy.mjs'
+import { readManifest } from './records.mjs'
 
 /** @type {unknown} */
 let report
@@ -9,8 +10,7 @@ try {
   throw new Error('npm audit returned invalid JSON', { cause: error })
 }
 
-const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
-const accepted = assertAcceptedAudit(report, manifest)
+const accepted = assertAcceptedAudit(report, readManifest('.'))
 
 console.log(
   accepted.vulnerabilityCount === 0

@@ -36,6 +36,5 @@ updates:
       actions:
         patterns:
           - "*"
-    labels:
-      - dependencies
-      - github-actions
+    # No custom labels: Dependabot creates its default dependencies and ecosystem labels when they are
+    # missing, but silently skips a configured label the repository does not define.

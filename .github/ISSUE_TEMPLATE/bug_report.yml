@@ -82,7 +82,7 @@ body:
     id: node-version
     attributes:
       label: Node.js version
-      description: The output of `node --version`.
+      description: The output of `node --version`. The package supports Node.js 22 or newer.
       placeholder: vX.Y.Z
     validations:
       required: true

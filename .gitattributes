@@ -1,0 +1,3 @@
+# Check out text with LF endings on every platform. Biome formats to LF, and a Windows checkout that
+# converted to CRLF would fail the format check on every file.
+* text=auto eol=lf

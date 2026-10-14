@@ -1,5 +1,5 @@
-# Continuous integration: build, type-check, and test the library on every push
-# and pull request against main, across the supported Node.js versions.
+# Continuous integration: build, type-check, test, and smoke-test the packed library on every push
+# and pull request against main, across the supported Node.js versions on Linux, macOS, and Windows.
 
 name: CI
 
@@ -20,19 +20,34 @@ concurrency:
 
 jobs:
   build:
-    name: Build and test (Node.js ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    name: Build and test (${{ matrix.os }}, Node.js ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         node-version: [22, 24, 26]
+        include:
+          # The repository-wide checks look at files and the dependency tree rather than the platform,
+          # so they run once, on this lane.
+          - os: ubuntu-latest
+            node-version: 24
+            primary: true
+          - os: macos-latest
+            node-version: 22
+          - os: macos-latest
+            node-version: 24
+          - os: windows-latest
+            node-version: 22
+          - os: windows-latest
+            node-version: 24
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The whitespace check diffs a commit range, so only its lane needs history.
-          fetch-depth: ${{ matrix.node-version == 24 && '0' || '1' }}
+          fetch-depth: ${{ matrix.primary && '0' || '1' }}
           persist-credentials: false
 
       - name: Use Node.js ${{ matrix.node-version }}
@@ -44,11 +59,11 @@ jobs:
       - run: npm ci
 
       - name: Repository quality checks
-        if: matrix.node-version == 24
+        if: matrix.primary
         run: npm run verify:commit
 
       - name: Check committed whitespace
-        if: matrix.node-version == 24
+        if: matrix.primary
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -70,16 +85,16 @@ jobs:
       - name: Test with coverage thresholds
         run: npm run test:coverage
 
+      # The smoke test packs the dist the Build step produced. npm run test:package would rebuild it.
       - name: Verify the packed package
-        if: matrix.node-version == 24
-        run: npm run test:package
+        run: node scripts/package-smoke.mjs
 
       - name: Audit all dependencies against the reviewed policy
-        if: matrix.node-version == 24
+        if: matrix.primary
         run: npm run audit:full
 
       - name: Audit runtime dependencies
-        if: matrix.node-version == 24
+        if: matrix.primary
         run: npm run audit:runtime
 
   ci-success:
@@ -89,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Require every supported Node.js lane
+      - name: Require every platform and Node.js lane
         env:
           BUILD_RESULT: ${{ needs.build.result }}
         run: test "$BUILD_RESULT" = success
