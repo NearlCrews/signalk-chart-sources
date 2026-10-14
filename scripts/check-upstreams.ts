@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
+import { isDeepStrictEqual } from 'node:util'
 import { XMLParser } from 'fast-xml-parser'
 import {
   CHART_SOURCES,
@@ -10,18 +11,42 @@ import {
   type LngLatBbox,
   MAX_MERCATOR_LAT,
   tileForLngLat,
+  type UpstreamTemplate,
   webMercatorTileBounds
 } from '../src/index.js'
 import { substituteZXY, withoutTrailingSlashes } from '../src/request.js'
 import { WMS_VERSION } from '../src/validate.js'
 import { isRecord, object } from './records.mjs'
-import { checkedPublicHttpsUrl } from './upstream-url.js'
+import {
+  ARCGIS_EXTENT_EDGES,
+  array,
+  collectWmsLayers,
+  EDGES,
+  type Edge,
+  edgeOverhangs,
+  envelopeOf,
+  envelopeUnion,
+  overhang,
+  PARSE_NOISE_DEGREES,
+  PNG_CONTENT_TYPE,
+  type RecordValue,
+  strings,
+  tileDimensions,
+  WEBP_CONTENT_TYPE,
+  type WmsLayer
+} from './upstream-documents.js'
+import {
+  checkedPublicHttpsUrl,
+  errorMessage,
+  HttpStatusError,
+  isTransientFetchFailure,
+  rethrowUnreachable,
+  retryDelayMs
+} from './upstream-url.js'
 
+/** One deadline per attempt, covering its redirects and its body. */
 const REQUEST_TIMEOUT_MS = 30_000
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
-const MAX_FETCH_ATTEMPTS = 2
-/** Pause between fetch attempts, so a transient upstream error gets a moment to clear. */
-const RETRY_DELAY_MS = 500
 /** Redirect hops followed per request. Every hop is checked before it is requested. */
 const MAX_REDIRECTS = 5
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
@@ -52,16 +77,6 @@ const XML = new XMLParser({
   maxNestedTags: 64
 })
 
-type RecordValue = Record<string, unknown>
-
-function array(value: unknown): unknown[] {
-  return value === undefined ? [] : Array.isArray(value) ? value : [value]
-}
-
-function strings(value: unknown): string[] {
-  return array(value).filter((entry): entry is string => typeof entry === 'string')
-}
-
 function requiredString(value: unknown, label: string): string {
   assert.ok(typeof value === 'string', `${label} must be a string`)
   return value
@@ -88,7 +103,9 @@ async function fetchFollowingCheckedRedirects(url: string): Promise<{ response: 
   // One deadline for the whole chain, so a redirect loop cannot stretch it hop by hop.
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   for (let hops = 0; ; hops++) {
-    const response = await fetch(current, { headers: { 'user-agent': USER_AGENT }, redirect: 'manual', signal })
+    const response = await fetch(current, { headers: { 'user-agent': USER_AGENT }, redirect: 'manual', signal }).catch(
+      rethrowUnreachable(current.href)
+    )
     if (!REDIRECT_STATUSES.has(response.status)) return { response, finalUrl: current }
     await response.body?.cancel()
     assert.ok(hops < MAX_REDIRECTS, `${url} redirected more than ${MAX_REDIRECTS} times`)
@@ -100,7 +117,10 @@ async function fetchFollowingCheckedRedirects(url: string): Promise<{ response: 
 
 async function fetchBytesOnce(url: string): Promise<Fetched> {
   const { response, finalUrl } = await fetchFollowingCheckedRedirects(url)
-  assert.ok(response.ok, `${url} returned HTTP ${response.status}`)
+  if (!response.ok) {
+    await response.body?.cancel()
+    throw new HttpStatusError(url, response.status)
+  }
   // Number(null) is 0, which is finite, so testing the converted value alone would silently pass
   // every response that omits the header.
   const declaredLength = response.headers.get('content-length')
@@ -113,7 +133,8 @@ async function fetchBytesOnce(url: string): Promise<Fetched> {
   const reader = response.body.getReader()
   try {
     for (;;) {
-      const { done, value } = await reader.read()
+      // A connection dropped mid-body is the same transient fault as one that never answered.
+      const { done, value } = await reader.read().catch(rethrowUnreachable(url))
       if (done) break
       byteLength += value.byteLength
       assert.ok(byteLength <= MAX_RESPONSE_BYTES, `${url} exceeded the response limit`)
@@ -133,41 +154,67 @@ async function fetchBytesOnce(url: string): Promise<Fetched> {
   return { response, bytes, finalUrl }
 }
 
+/**
+ * Fetch with a retry for transient failures only. A 404, a rejected redirect, or an oversized body
+ * fails the same way every time, so retrying one would only delay the report.
+ */
 async function fetchBytes(url: string): Promise<Fetched> {
-  let lastError: unknown
-  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
+  for (let attempt = 0; ; attempt++) {
     try {
       return await fetchBytesOnce(url)
     } catch (error) {
-      lastError = error
-      if (attempt < MAX_FETCH_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+      const delay = retryDelayMs(attempt)
+      if (delay === undefined || !isTransientFetchFailure(error)) throw error
+      await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
-  throw lastError
 }
 
-function expectedContentType(source: ChartSource): RegExp {
-  if (source.upstream.mode === 'style') return /json/i
-  if (source.upstream.mode === 'xyz' && source.upstream.urlTemplate.endsWith('.pbf')) {
-    return /protobuf|octet-stream/i
-  }
-  if (source.upstream.mode === 'xyz' && source.upstream.urlTemplate.endsWith('.webp')) {
-    return /image\/webp/i
-  }
-  return /image\//i
+/**
+ * The image type a requested format comes back as: every PNG variant (image/png8 from a WMTS, png32
+ * from an ArcGIS export) arrives as image/png, and WebP as image/webp.
+ */
+function imageType(format: string): RegExp {
+  return /png/i.test(format) ? PNG_CONTENT_TYPE : /webp/i.test(format) ? WEBP_CONTENT_TYPE : /^image\//i
 }
 
-function assertPngDimensions(source: ChartSource, contentType: string, bytes: Uint8Array): void {
-  if (!/image\/png/i.test(contentType)) return
-  assert.ok(bytes.byteLength >= 24, `${source.id} returned a truncated PNG`)
-  assert.deepEqual(
-    [...bytes.subarray(0, 8)],
-    [137, 80, 78, 71, 13, 10, 26, 10],
-    `${source.id} returned invalid PNG data`
-  )
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  assert.equal(view.getUint32(16), source.tileSize, `${source.id} PNG width drifted`)
-  assert.equal(view.getUint32(20), source.tileSize, `${source.id} PNG height drifted`)
+/**
+ * The media type a source's representative tile must arrive as. An XYZ template names its format by
+ * extension. Every other mode names it in the request itself, so it is read from the URL the shared
+ * builder produced: a builder that changes format then moves this expectation with it.
+ */
+function expectedContentType(upstream: Exclude<UpstreamTemplate, { mode: 'style' }>, request: URL): RegExp {
+  if (upstream.mode === 'xyz') {
+    const extension = /\.(\w+)$/.exec(upstream.urlTemplate)?.[1] ?? ''
+    return extension === 'pbf' ? /protobuf|octet-stream/i : imageType(extension)
+  }
+  // ArcGIS spells its parameters in lowercase; WMS and WMTS spell theirs in capitals.
+  const parameter = upstream.mode === 'arcgis' ? 'format' : 'FORMAT'
+  const format = request.searchParams.get(parameter)
+  assert.ok(format, `${request.href} names no ${parameter}`)
+  return imageType(format)
+}
+
+/**
+ * Require a response of the expected media type, and return the type it arrived as. A mismatch quotes
+ * the opening text of a text body, which for a WMS is its service exception.
+ */
+function assertContentType({ response, bytes }: Fetched, expected: RegExp, what: string): string {
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!expected.test(contentType)) {
+    const excerpt = /xml|text|json|html/i.test(contentType)
+      ? `: ${new TextDecoder().decode(bytes.subarray(0, 300)).replace(/\s+/g, ' ').trim()}`
+      : ''
+    assert.fail(`${what} returned ${contentType || 'no content type'} where ${expected} was expected${excerpt}`)
+  }
+  return contentType
+}
+
+function assertTileDimensions(source: ChartSource, contentType: string, bytes: Uint8Array): void {
+  const dimensions = tileDimensions(contentType, bytes)
+  if (dimensions === null) return
+  assert.equal(dimensions.width, source.tileSize, `${source.id} tile width drifted`)
+  assert.equal(dimensions.height, source.tileSize, `${source.id} tile height drifted`)
 }
 
 function bboxCenter(bbox: LngLatBbox): readonly [number, number] {
@@ -289,24 +336,31 @@ async function checkSource(source: ChartSource): Promise<void> {
 
   const [z, x, y] = representativeTile(source)
   const url = expandUpstreamUrl(source, z, x, y)
-  const { response, bytes } = await fetchBytes(url)
-  const contentType = response.headers.get('content-type') ?? ''
-  assert.match(contentType, expectedContentType(source), `${source.id} content type drifted`)
-  assertPngDimensions(source, contentType, bytes)
-  console.log(`${source.id}: z${z}/${x}/${y}, HTTP ${response.status}, ${contentType}, ${bytes.byteLength} bytes`)
+  const fetched = await fetchBytes(url)
+  const contentType = assertContentType(fetched, expectedContentType(source.upstream, new URL(url)), source.id)
+  assertTileDimensions(source, contentType, fetched.bytes)
+  console.log(
+    `${source.id}: z${z}/${x}/${y}, HTTP ${fetched.response.status}, ${contentType}, ${fetched.bytes.byteLength} bytes`
+  )
 }
 
 /**
- * Fetch and parse a JSON document. Style documents, TileJSON, ArcGIS service metadata, and the
- * attribution check all need the same steps, and one helper keeps them from drifting apart.
+ * Fetch and parse a JSON document. Style documents, TileJSON, and ArcGIS service metadata all need
+ * the same steps, and one helper keeps them from drifting apart.
  */
 async function fetchJson(url: string, label: string): Promise<{ json: RecordValue; finalUrl: URL }> {
-  const { response, bytes, finalUrl } = await fetchBytes(url)
-  assert.match(response.headers.get('content-type') ?? '', /json/i, `${finalUrl} content type drifted`)
+  const fetched = await fetchBytes(url)
+  const { bytes, finalUrl } = fetched
+  assertContentType(fetched, /json/i, `${finalUrl} ${label}`)
   const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
   return { json: object(parsed, `${finalUrl} ${label}`), finalUrl }
 }
 
+/**
+ * Check the credit and zoom range a TileJSON publishes against its catalog source. maxzoom is the
+ * deepest zoom of the data the TileJSON describes: maxzoom for an XYZ tileset, and vectorMaxzoom for
+ * the vector data behind a style.
+ */
 function assertTileJsonMetadata(source: ChartSource, url: string, tileJson: RecordValue, maxzoom: number): void {
   const published = requiredString(tileJson['attribution'], `${source.id} upstream attribution`)
   // Exact, not a substring or a trim. The catalog's rule is that attribution is transcribed, and a
@@ -314,9 +368,12 @@ function assertTileJsonMetadata(source: ChartSource, url: string, tileJson: Reco
   assert.equal(
     source.attribution,
     published,
-    `${source.id} attribution drifted from ${url}. Transcribe the upstream value into registry.ts and ` +
-      `Binnacle's copy together.`
+    `${source.id} attribution drifted from ${url}. Transcribe the upstream value into registry.ts.`
   )
+  const publishedMinzoom = tileJson['minzoom']
+  if (publishedMinzoom !== undefined) {
+    assert.equal(Number(publishedMinzoom), source.minzoom, `${source.id} minzoom drifted from ${url}`)
+  }
   const publishedMaxzoom = tileJson['maxzoom']
   if (publishedMaxzoom !== undefined) {
     assert.equal(Number(publishedMaxzoom), maxzoom, `${source.id} maxzoom drifted from ${url}`)
@@ -325,56 +382,63 @@ function assertTileJsonMetadata(source: ChartSource, url: string, tileJson: Reco
 
 /**
  * Check an XYZ source against the TileJSON its service publishes. A tile template carries no
- * metadata of its own, so without this the transcribed attribution is checked by nothing: Seascape
- * shortened its credit line and the monitor stayed green through it. The URL lives on the source
- * rather than in a table here, because the catalog is the only place upstream data belongs.
+ * metadata of its own, so without this the transcribed attribution and zoom range are checked by
+ * nothing: Seascape shortened its credit line and the monitor stayed green through it. The TileJSON
+ * also names the live tile template, so a tileset moved to a new path is caught here even while the
+ * old path still answers. The URL lives on the source rather than in a table here, because the
+ * catalog is the only place upstream data belongs.
  */
-async function checkTileJsonAttribution(source: ChartSource, tileJsonUrl: string): Promise<void> {
+async function checkTileJson(source: ChartSource): Promise<void> {
+  assert.ok(source.upstream.mode === 'xyz' && source.upstream.tileJsonUrl !== undefined)
+  const tileJsonUrl = source.upstream.tileJsonUrl
   const { json: tileJson } = await fetchJson(tileJsonUrl, 'TileJSON')
   assertTileJsonMetadata(source, tileJsonUrl, tileJson, source.maxzoom)
-  console.log(`${source.id}: attribution matches ${tileJsonUrl}`)
-}
-
-function collectWmsLayers(layer: unknown, layers = new Map<string, RecordValue>()): Map<string, RecordValue> {
-  for (const entry of array(layer)) {
-    if (!isRecord(entry)) continue
-    if (typeof entry['Name'] === 'string') layers.set(entry['Name'], entry)
-    collectWmsLayers(entry['Layer'], layers)
-  }
-  return layers
+  const tiles = strings(tileJson['tiles'])
+  assert.ok(
+    tiles.includes(source.upstream.urlTemplate),
+    `${source.id} template ${source.upstream.urlTemplate} is not among the tiles ${tileJsonUrl} publishes: ` +
+      JSON.stringify(tiles)
+  )
+  console.log(`${source.id}: template, zoom range, and attribution match ${tileJsonUrl}`)
 }
 
 /** How far a catalog box may sit outside an advertised envelope before it counts as drift. */
 const ENVELOPE_TOLERANCE_DEGREES = 0.5
 
-type EnvelopeEdges = readonly [west: string, south: string, east: string, north: string]
+interface NarrowerEdges {
+  readonly edges: readonly Edge[]
+  readonly reason: string
+}
 
-const WMS_ENVELOPE_EDGES: EnvelopeEdges = [
-  'westBoundLongitude',
-  'southBoundLatitude',
-  'eastBoundLongitude',
-  'northBoundLatitude'
-]
-const ARCGIS_EXTENT_EDGES: EnvelopeEdges = ['xmin', 'ymin', 'xmax', 'ymax']
-
-/** A coordinate published as a number or a numeric string, and NaN for anything else. */
-function coordinate(value: unknown): number {
-  return typeof value === 'number' || (typeof value === 'string' && value !== '') ? Number(value) : Number.NaN
+const EMODNET_FACET_NORTH: NarrowerEdges = {
+  edges: ['north'],
+  reason: 'the north edge stops at 85, where the DTM sampling its coverage comes from stopped'
 }
 
 /**
- * An advertised envelope as a bbox, or null when it is missing or any edge is not a finite number. The
- * edges default to a WMS EX_GeographicBoundingBox.
+ * Bounds edges that deliberately stop short of the envelope a source's layers advertise, each with its
+ * reason. Every other edge of every bounded WMS or ArcGIS source must hold the whole advertised
+ * envelope, or data a layer gained past the old edge is never drawn.
  */
-function envelopeOf(box: unknown, [west, south, east, north] = WMS_ENVELOPE_EDGES): LngLatBbox | null {
-  if (!isRecord(box)) return null
-  const envelope: LngLatBbox = [
-    coordinate(box[west]),
-    coordinate(box[south]),
-    coordinate(box[east]),
-    coordinate(box[north])
-  ]
-  return envelope.every(Number.isFinite) ? envelope : null
+const NARROWER_THAN_ADVERTISED: Readonly<Record<string, NarrowerEdges>> = {
+  'depth-emodnet': {
+    edges: ['west', 'south', 'north'],
+    reason: 'the bounds are the union of where sampling found data, and the advertised box is the tiling extent'
+  },
+  'depth-emodnet-quality': EMODNET_FACET_NORTH,
+  'depth-emodnet-contours': EMODNET_FACET_NORTH
+}
+
+/** Hold a source's bounds to the whole envelope its upstream advertises, but for the edges exempted above. */
+function assertBoundsHoldEnvelope(source: ChartSource, bounds: LngLatBbox, advertised: LngLatBbox): void {
+  const exempt = NARROWER_THAN_ADVERTISED[source.id]?.edges ?? []
+  const overhangs = edgeOverhangs(advertised, bounds)
+  const cut = EDGES.filter((edge) => !exempt.includes(edge) && overhangs[edge] > PARSE_NOISE_DEGREES)
+  assert.ok(
+    cut.length === 0,
+    `${source.id} bounds ${JSON.stringify(bounds)} no longer hold the advertised envelope ` +
+      `${JSON.stringify(advertised)} (edges cut: ${cut.join(', ')}); widen them, rounding outward`
+  )
 }
 
 /**
@@ -386,9 +450,6 @@ interface CoverageDerivation {
   readonly envelope: LngLatBbox
   readonly layer?: string
 }
-
-/** Only parse noise: any real move of a derivation envelope means re-deriving the coverage. */
-const DERIVATION_TOLERANCE_DEGREES = 1e-6
 
 // The NOAA ENC bounds are the service envelope by definition, and the ENC product catalog extremes its
 // coverage came from match them, so the catalog's own copy is the one compared.
@@ -426,10 +487,13 @@ function assertCoverageDerivation(
   published: LngLatBbox | null,
   label: string
 ): void {
-  assert.ok(published, `${source.id} upstream no longer publishes the ${label} its coverage was derived from`)
+  assert.ok(
+    published,
+    `${source.id} upstream no longer publishes a usable ${label}, the one its coverage was derived from`
+  )
   assert.ok(
     published.every(
-      (edge, index) => Math.abs(edge - (derivation.envelope[index] ?? Number.NaN)) <= DERIVATION_TOLERANCE_DEGREES
+      (edge, index) => Math.abs(edge - (derivation.envelope[index] ?? Number.NaN)) <= PARSE_NOISE_DEGREES
     ),
     `${source.id} coverage was derived from the ${label} ${JSON.stringify(derivation.envelope)}, which now reads ` +
       `${JSON.stringify(published)}; re-derive it`
@@ -447,7 +511,7 @@ function wmsCapabilitiesUrl(base: string): string {
 interface WmsCapabilities {
   readonly service: RecordValue
   readonly rootLayer: RecordValue
-  readonly layers: Map<string, RecordValue>
+  readonly layers: Map<string, WmsLayer>
   readonly formats: string[]
 }
 
@@ -506,20 +570,16 @@ function checkWmsSource(source: ChartSource, capabilities: WmsCapabilities): voi
     return configured
   })
   // STYLES pairs with LAYERS by position, so a style must be offered by the layer it is requested
-  // for. Searching every layer's styles would pass a request the server rejects.
+  // for, directly or through a layer enclosing it. Searching every layer's styles would pass a
+  // request the server rejects.
   if (source.upstream.styles !== '') {
     // The list lengths already agree: validateChartSource enforces the pairing when the catalog is
     // built, so this only has to check availability against the live capabilities.
     const requestedStyles = source.upstream.styles.split(',')
     requestedStyles.forEach((style, index) => {
       if (style === '') return
-      const layer = configuredLayers[index]
-      const availableStyles = array(layer?.['Style'])
-        .filter(isRecord)
-        .map((entry) => entry['Name'])
-        .filter((name): name is string => typeof name === 'string')
       assert.ok(
-        availableStyles.includes(style),
+        configuredLayers[index]?.styles.includes(style),
         `${source.id} style ${style} is unavailable on layer ${requestedLayers[index]}`
       )
     })
@@ -528,44 +588,41 @@ function checkWmsSource(source: ChartSource, capabilities: WmsCapabilities): voi
   const expectedTitles = EXPECTED_WMS_LAYER_TITLES[source.id]
   if (expectedTitles) {
     assert.deepEqual(
-      Object.fromEntries(requestedLayers.map((name, index) => [name, configuredLayers[index]?.['Title']])),
+      Object.fromEntries(requestedLayers.map((name, index) => [name, configuredLayers[index]?.entry['Title']])),
       expectedTitles,
       `${source.id} layers no longer carry the expected content, or its title expectations no longer match ` +
         'its configured layers'
     )
   }
 
-  // A source that declares bounds is checked against the envelope its own layer advertises.
-  // Containment rather than equality, because some bounds are deliberately narrower: the EMODnet ones
-  // come from sampling where the grid actually has data, and the advertised box is the tiling extent.
-  // A catalog box reaching outside the advertised one is always wrong, either a bad transcription or
-  // an upstream that shrank.
-  const advertised = source.bounds
-    ? envelopeOf(layers.get(requestedLayers[0] ?? '')?.['EX_GeographicBoundingBox'])
-    : null
-  if (source.bounds && advertised) {
-    const [west, south, east, north] = source.bounds
-    const [advWest, advSouth, advEast, advNorth] = advertised
+  if (source.bounds) {
+    // Every requested layer draws inside the bounds, so they are compared with the union of what the
+    // layers advertise. A layer with no usable envelope, own or inherited, leaves nothing to compare,
+    // which is drift in itself rather than a pass.
+    const advertised = envelopeUnion(configuredLayers.map((layer) => layer.envelope))
     assert.ok(
-      west >= advWest - ENVELOPE_TOLERANCE_DEGREES &&
-        south >= advSouth - ENVELOPE_TOLERANCE_DEGREES &&
-        east <= advEast + ENVELOPE_TOLERANCE_DEGREES &&
-        north <= advNorth + ENVELOPE_TOLERANCE_DEGREES,
+      advertised,
+      `${source.id} layers advertise no usable geographic envelope (missing, malformed, or crossing the ` +
+        'antimeridian) to check its bounds against'
+    )
+    // A catalog box reaching outside the advertised one is always wrong, either a bad transcription
+    // or an upstream that shrank.
+    assert.ok(
+      overhang(source.bounds, advertised) <= ENVELOPE_TOLERANCE_DEGREES,
       `${source.id} bounds ${JSON.stringify(source.bounds)} reach outside the advertised ` +
         `envelope ${JSON.stringify(advertised)}`
     )
+    assertBoundsHoldEnvelope(source, source.bounds, advertised)
   }
 
   const derivation = COVERAGE_DERIVATIONS[source.id]
   if (derivation) {
-    const layer = derivation.layer === undefined ? rootLayer : layers.get(derivation.layer)
-    const published = envelopeOf(layer?.['EX_GeographicBoundingBox'])
+    const published =
+      derivation.layer === undefined
+        ? envelopeOf(rootLayer['EX_GeographicBoundingBox'])
+        : (layers.get(derivation.layer)?.envelope ?? null)
     assertCoverageDerivation(source, derivation, published, `${derivation.layer ?? 'service'} envelope`)
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**
@@ -648,7 +705,7 @@ async function checkEmodnetRelease(base: string, sources: readonly ChartSource[]
   const { layers } = await wmsCapabilities(base)
   const qualityIndex = layers.get('emodnet:quality_index')
   assert.ok(qualityIndex, 'EMODnet no longer publishes emodnet:quality_index, the release signal')
-  const time = array(qualityIndex['Dimension'])
+  const time = array(qualityIndex.entry['Dimension'])
     .filter(isRecord)
     .find((dimension) => dimension['@_name'] === 'time')
   const defaultTime = typeof time?.['@_default'] === 'string' ? time['@_default'] : ''
@@ -701,22 +758,42 @@ async function checkArcgisService(source: ChartSource): Promise<void> {
   const url = `${withoutTrailingSlashes(source.upstream.base)}?f=json`
   const { json: service } = await fetchJson(url, 'ArcGIS service')
   // ArcGIS reports a failure as an error object inside a successful response.
-  assert.ok(service['error'] === undefined || service['error'] === null, `${source.id} service reported an error`)
+  assert.ok(
+    service['error'] === undefined || service['error'] === null,
+    `${source.id} service reported an error: ${JSON.stringify(service['error'])}`
+  )
   assert.ok(commaList(service['capabilities']).includes('Map'), `${source.id} service no longer exports maps`)
   assert.ok(
     commaList(service['supportedImageFormatTypes']).includes('PNG32'),
     `${source.id} service no longer offers the PNG32 format expandUpstreamUrl requests`
   )
-  const layers = array(service['layers'])
-    .filter(isRecord)
+  const layers = array(service['layers']).filter(isRecord)
+  assert.deepEqual(
+    layers.map((layer) => layer['name']),
+    expectedLayers,
+    `${source.id} sub-layers drifted; re-derive its coverage`
+  )
+  // The export request names no layers, so the server draws the ones visible by default, at the scales
+  // each allows. A sub-layer switched off or given a scale range upstream would vanish from some or all
+  // tiles without any error, so each must stay on by default at every scale.
+  const hidden = layers
+    .filter((layer) => layer['defaultVisibility'] !== true || layer['minScale'] !== 0 || layer['maxScale'] !== 0)
     .map((layer) => layer['name'])
-  assert.deepEqual(layers, expectedLayers, `${source.id} sub-layers drifted; re-derive its coverage`)
+  assert.ok(
+    hidden.length === 0,
+    `${source.id} sub-layers no longer drawn by default at every scale: ${hidden.join(', ')}`
+  )
   const extent = object(service['fullExtent'], `${source.id} fullExtent`)
   const reference = object(extent['spatialReference'], `${source.id} fullExtent spatialReference`)
   assert.equal(reference['latestWkid'] ?? reference['wkid'], 4326, `${source.id} fullExtent left EPSG:4326`)
+  const published = envelopeOf(extent, ARCGIS_EXTENT_EDGES)
+  if (source.bounds) {
+    assert.ok(published, `${source.id} fullExtent is not a usable envelope to check its bounds against`)
+    assertBoundsHoldEnvelope(source, source.bounds, published)
+  }
   const derivation = COVERAGE_DERIVATIONS[source.id]
-  if (derivation) assertCoverageDerivation(source, derivation, envelopeOf(extent, ARCGIS_EXTENT_EDGES), 'fullExtent')
-  console.log(`${source.id}: ArcGIS service verified with ${layers.length} sub-layers`)
+  if (derivation) assertCoverageDerivation(source, derivation, published, 'fullExtent')
+  console.log(`${source.id}: ArcGIS service verified with ${layers.length} sub-layers drawn by default`)
 }
 
 /** The template with its tokens zeroed: a valid URL whose query still names the configured layer. */
@@ -733,6 +810,10 @@ function wmtsCapabilitiesUrl(configured: URL): string {
   return url.href
 }
 
+/**
+ * Check a WMTS source's layer, format, style, and tile matrices. Its bounds are checked through a WMS
+ * source sharing them instead, which the module asserts below.
+ */
 async function checkWmtsCapabilities(source: ChartSource): Promise<void> {
   assert.equal(source.upstream.mode, 'wmts')
   const configured = zeroedTemplateUrl(source.upstream.urlTemplate)
@@ -831,6 +912,35 @@ assert.deepEqual(
   Object.keys(COVERAGE_DERIVATIONS).sort(),
   'every catalog source with coverage needs exactly one COVERAGE_DERIVATIONS entry in the upstream monitor'
 )
+// An exemption naming a source the catalog dropped or renamed, or one whose bounds the monitor never
+// compares, would silently stop meaning anything.
+for (const id of Object.keys(NARROWER_THAN_ADVERTISED)) {
+  const source = chartSourceById(id)
+  assert.ok(
+    source?.bounds !== undefined && (source.upstream.mode === 'wms' || source.upstream.mode === 'arcgis'),
+    `NARROWER_THAN_ADVERTISED names ${id}, which is not a bounded WMS or ArcGIS catalog source`
+  )
+}
+
+// WMTS capabilities are not trusted for bounds: the one WMTS layer in the catalog, bluetopo:bathymetry,
+// advertises a WGS84BoundingBox reaching 17.05 east (read 2026-10-14) over US-only data. Each bounded
+// WMTS source must instead share its bounds with a WMS source held to its advertised envelope on every
+// edge, so a WMTS source added without such a twin fails here rather than going unchecked.
+for (const source of CHART_SOURCES) {
+  if (source.upstream.mode !== 'wmts' || source.bounds === undefined) continue
+  const twin = CHART_SOURCES.find(
+    (other) =>
+      other.upstream.mode === 'wms' &&
+      NARROWER_THAN_ADVERTISED[other.id] === undefined &&
+      isDeepStrictEqual(other.bounds, source.bounds)
+  )
+  assert.ok(
+    twin,
+    `${source.id} is a WMTS source whose bounds no fully checked WMS source shares, so nothing compares them ` +
+      'with an advertised envelope'
+  )
+}
+
 for (const source of sourcesWithCoverage) {
   assert.ok(
     source.upstream.mode === 'wms' || source.upstream.mode === 'arcgis',
@@ -851,10 +961,8 @@ const checks: ReadonlyArray<readonly [string, Promise<void>]> = [
   ...CHART_SOURCES.filter((source) => source.upstream.mode === 'arcgis').map(
     (source) => [`${source.id} ArcGIS service`, checkArcgisService(source)] as const
   ),
-  ...CHART_SOURCES.flatMap((source) =>
-    source.upstream.mode === 'xyz' && source.upstream.tileJsonUrl !== undefined
-      ? [[`${source.id} attribution`, checkTileJsonAttribution(source, source.upstream.tileJsonUrl)] as const]
-      : []
+  ...CHART_SOURCES.filter((source) => source.upstream.mode === 'xyz' && source.upstream.tileJsonUrl !== undefined).map(
+    (source) => [`${source.id} TileJSON`, checkTileJson(source)] as const
   )
 ]
 
