@@ -9,6 +9,76 @@ contract and the Unreleased section for pending compatibility changes.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-14
+
+### Security
+
+- Reject URLs, `allowedHosts` entries, WMS layer, style, and format values, and `proxyTileTemplate`
+  plugin bases that contain any Unicode default-ignorable character, such as a variation selector,
+  the combining grapheme joiner, or a Hangul filler. IDNA drops these from a host just as it drops
+  the zero-width characters already rejected, so `https://exa\uFE0Fmple.com` reached `example.com`.
+- Copy a source's `bounds`, `coverage`, and `allowedHosts` entry by entry instead of through
+  `Array#slice`, which builds its result through the list's own constructor. A list with a hostile
+  `Symbol.species` could choose what validation read, which let an `allowedHosts` list holding an IP
+  literal pass `validateChartSource`. An entry inherited from a polluted `Array.prototype` no longer
+  fills a hole in a sparse list.
+- Read only an own `maxTiles` in `tilesInBbox` and `iterateTilesInBbox`, so a `maxTiles` planted on a
+  polluted `Object.prototype` can no longer lift the enumeration cap for every call that sets none.
+
+### Changed
+
+- Require the `options` argument of `tilesInBbox` and `iterateTilesInBbox` to be an object. A number
+  passed in its place used to fall back silently to the 1,000,000-tile default, and `null` threw an
+  engine error; both now throw a `TypeError`.
+- Read the box and zoom range passed to the tile helpers and `estimateBytes` once, into private
+  copies, so a getter or a custom iterator cannot pass validation with one value and feed the tile
+  math another.
+- Quote rejected strings in error messages, and name a rejected object or function by its type
+  without running its code. `['s']` no longer reads as the valid id `s`, and a throwing
+  `Symbol.toStringTag` can no longer replace the error. Echoed input escapes the whole
+  default-ignorable set, and the `expandUpstreamUrl` zoom error names the source's zoom range.
+- Round bounds transcribed from an advertised envelope outward, so no strip of data along an edge is
+  dropped. The EMODnet Human Activities overlays, the EMODnet quality index and contours, and the
+  four radar mosaics grow by at most 0.01 degrees, and `traffic-vessel-density` reaches the
+  advertised 86.81 north, past the Web Mercator limit where tiling stops.
+- Retitle `weather-radar-conus` "Contiguous US weather radar". The Alaska, Hawaii, and Caribbean
+  mosaics are separate sources.
+- Move `mpa-noaa` next to the other protected-area sources in `CHART_SOURCES`.
+- Document that MapLibre reads an antimeridian-crossing `bounds` as empty, so a renderer must widen
+  such an envelope, and that the type `validateChartSource` narrows to holds for the values it read
+  during the call.
+- Build, test, and smoke-test the packed package on macOS and Windows as well as Linux in CI. The
+  smoke test runs each tool through the bin its package declares, checks that the declarations name
+  exactly the runtime exports and that `validateChartSource` narrows `unknown`, and rejects
+  install-time lifecycle scripts and unexpected files in `dist`.
+- Fail the full dependency audit when an accepted advisory's vulnerable range changes or npm can fix
+  it without a breaking change.
+- Run zizmor's online audits, which confirm each pinned action's release comment names its commit,
+  and require in the workflow invariants a release comment on every pinned action, a timeout on every
+  job, unconditional required steps without `continue-on-error`, a release-only publish trigger, a
+  publish job that runs exactly its reviewed commands, a CI gate that fails when no build lane ran,
+  and a matrix that tests the Node.js 22 floor.
+- Smoke-test the package CI already built instead of rebuilding it for the smoke test.
+- Report in the upstream monitor a layer that grows past its catalog bounds, a bounded source whose
+  layers advertise no envelope, a moved TileJSON tile template, TileJSON zoom drift, a NOAA MPA
+  sub-layer hidden by default or limited by scale, WebP tile size drift, and a tile whose type differs
+  from the format its request names. Every bounds edge must hold the advertised envelope unless the
+  monitor lists it as deliberately narrower, the NOAA MPA extent included. The monitor applies WMS
+  1.3.0 envelope and style inheritance, retries only transient failures, after longer and jittered
+  pauses, and names the URL and cause of a network failure.
+- Reject Node-only globals in `src` through Biome, and report test coverage and stack traces against
+  the TypeScript sources.
+- Refresh `@types/node`, `cspell`, and `knip`.
+
+### Fixed
+
+- Credit each upstream the way it asks to be credited today:
+  - EMODnet Human Activities: CC BY 4.0 and the data originator each layer names, which is Cogea
+    for every layer but the wind farms, compiled by CETMAR.
+  - Marine Regions boundaries: CC BY 4.0 instead of an unversioned CC-BY.
+  - OpenSeaMap seamarks: the CC BY-SA 2.0 license OpenSeaMap states for its map, alongside the
+    OpenStreetMap ODbL credit.
+
 ## [0.8.0] - 2026-10-05
 
 ### Added
@@ -468,7 +538,8 @@ drift. Data and pure helpers only: no MapLibre, no Signal K, and no Node or brow
   Locker plugin and the Binnacle webapp panel share the same math, so the server-side budget
   re-validation agrees with the panel estimate. Unknown source ids are skipped.
 
-[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/NearlCrews/signalk-chart-sources/compare/v0.7.0...v0.7.1
